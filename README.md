@@ -58,13 +58,14 @@ kenney_*/                  # source asset packs (CC0)
 
 All art is from [Kenney](https://kenney.nl/) under [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/). Packs in use:
 
-- `kenney_roguelike-rpg-pack` — overworld tiles, items
+- `kenney_roguelike-rpg-pack` — overworld + dungeon tiles, items
 - `kenney_roguelike-characters` — character sprites
 - `kenney_roguelike-indoors` — town interiors
-- `kenney_roguelike-caves-dungeons` — dungeon tiles
 - `kenney_ui-pack-pixel-adventure` — game UI
 - `kenney_minimap-pack` — minimap icons
 - `kenney_input-prompts-pixel` — control prompts
+
+> A dedicated `kenney_roguelike-caves-dungeons` pack is planned but not currently in-repo. The RPG pack covers dungeon tiles for v1; we can swap when the pack is re-added.
 
 Audio (music + SFX) is placeholder until the user supplies real files.
 
