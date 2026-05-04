@@ -18,10 +18,10 @@ export class DeathSummaryScene extends Phaser.Scene {
   create(data: DeathData): void {
     const services = getServices(this);
 
-    // Calculate "Souls" earned from depth + survival.
-    const souls = Math.max(1, data.floor * 5 + Math.floor(data.turn / 3) + data.kills * 2);
+    // Calculate Embers earned from depth + survival.
+    const embers = Math.max(1, data.floor * 5 + Math.floor(data.turn / 3) + data.kills * 2);
     services.setPersistent((s) => {
-      s.metaCurrency += souls;
+      s.metaCurrency += embers;
     });
     services.save.clearRun();
 
@@ -49,8 +49,8 @@ export class DeathSummaryScene extends Phaser.Scene {
       ['Floor reached', `${data.floor}`],
       ['Turns survived', `${data.turn}`],
       ['Kills', `${data.kills}`],
-      ['Souls earned', `+${souls}`],
-      ['Total souls', `${services.persistent.metaCurrency}`],
+      ['Embers earned', `+${embers}`],
+      ['Total embers', `${services.persistent.metaCurrency}`],
     ];
     let y = GAME_HEIGHT / 2 - 40;
     for (const [k, v] of lines) {

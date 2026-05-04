@@ -14,43 +14,24 @@ export class PauseScene extends Phaser.Scene {
       scene: this,
       x: GAME_WIDTH / 2,
       y: GAME_HEIGHT / 2,
-      width: 400,
-      height: 360,
+      width: 360,
+      height: 240,
       title: 'PAUSED',
     });
-
-    let y = GAME_HEIGHT / 2 - 80;
-    const dy = 70;
 
     new KenneyButton({
       scene: this,
       x: GAME_WIDTH / 2,
-      y,
+      y: GAME_HEIGHT / 2 - 16,
       text: 'Resume',
       primary: true,
       onClick: () => this.resume(),
     });
-    y += dy;
+
     new KenneyButton({
       scene: this,
       x: GAME_WIDTH / 2,
-      y,
-      text: 'Inventory',
-      onClick: () => this.scene.launch(SCENE_KEYS.Inventory),
-    });
-    y += dy;
-    new KenneyButton({
-      scene: this,
-      x: GAME_WIDTH / 2,
-      y,
-      text: 'Character',
-      onClick: () => this.scene.launch(SCENE_KEYS.Character),
-    });
-    y += dy;
-    new KenneyButton({
-      scene: this,
-      x: GAME_WIDTH / 2,
-      y,
+      y: GAME_HEIGHT / 2 + 36,
       text: 'Abandon Run',
       onClick: () =>
         this.scene.launch(SCENE_KEYS.ConfirmDialog, {

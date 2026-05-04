@@ -15,9 +15,9 @@ export interface KenneyButtonOptions {
   primary?: boolean;
 }
 
-const BORDER = 8;
-const DEFAULT_W = 240;
-const DEFAULT_H = 56;
+const BORDER = 6;
+const DEFAULT_W = 180;
+const DEFAULT_H = 36;
 
 /**
  * Touch-friendly button rendered using Phaser's built-in 9-slice on a single
@@ -55,7 +55,7 @@ export class KenneyButton extends Phaser.GameObjects.Container {
     this.label = opts.scene.add
       .text(0, 0, opts.text, {
         fontFamily: 'monospace',
-        fontSize: '18px',
+        fontSize: '14px',
         color: opts.primary ? '#3a2a1f' : '#e5e3d8',
         fontStyle: opts.primary ? 'bold' : 'normal',
       })

@@ -30,7 +30,7 @@ export class CharacterScene extends Phaser.Scene {
       ['Attack Power', `${stats.power}`],
       ['Armor', `${stats.armor}`],
       ['Hunger', '(coming iteration 2)'],
-      ['Souls (meta)', `${services.persistent.metaCurrency}`],
+      ['Embers (meta)', `${services.persistent.metaCurrency}`],
     ];
 
     let y = GAME_HEIGHT / 2 - 110;

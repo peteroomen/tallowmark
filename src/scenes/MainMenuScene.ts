@@ -14,26 +14,32 @@ export class MainMenuScene extends Phaser.Scene {
 
     this.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, COLORS.bg);
 
-    this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 200, 'TALLOWMARK', {
-        fontFamily: 'monospace',
-        fontSize: '64px',
-        color: '#d4a24c',
-      })
-      .setOrigin(0.5);
+    // Layout: title block + button stack centred together as one composition.
+    // 4 buttons × 48px stride = 192px, plus title (~70px) + subtitle (~22px)
+    // + gap (~24px) ≈ 308px total. Center vertically in 768.
+    const blockHeight = 308;
+    const blockTop = (GAME_HEIGHT - blockHeight) / 2;
 
     this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 140, 'a turn-based descent', {
+      .text(GAME_WIDTH / 2, blockTop, 'TALLOWMARK', {
         fontFamily: 'monospace',
-        fontSize: '18px',
+        fontSize: '56px',
+        color: '#d4a24c',
+      })
+      .setOrigin(0.5, 0);
+
+    this.add
+      .text(GAME_WIDTH / 2, blockTop + 64, 'a turn-based descent', {
+        fontFamily: 'monospace',
+        fontSize: '16px',
         color: '#9a988e',
         fontStyle: 'italic',
       })
-      .setOrigin(0.5);
+      .setOrigin(0.5, 0);
 
     const btnX = GAME_WIDTH / 2;
-    let y = GAME_HEIGHT / 2 - 40;
-    const dy = 70;
+    let y = blockTop + 120;
+    const dy = 48;
 
     new KenneyButton({
       scene: this,

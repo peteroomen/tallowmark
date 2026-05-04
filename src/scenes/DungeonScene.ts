@@ -18,7 +18,7 @@ import { Enemy, type EnemyAiContext } from '@/entities/Enemy';
 import { RatAi } from '@/entities/ai/RatAi';
 import { generateBspDungeon, type GeneratedDungeon } from '@/world/Dungeon/BspGenerator';
 import { TileKind, TILES } from '@/world/Tile';
-import { CharsSheet, Inputs } from '@/world/FrameCatalog';
+import { CharsSheet, Inputs, UiLarge } from '@/world/FrameCatalog';
 import { findPath, findPathToBump } from '@/core/Pathfinding';
 import { chebyshev, type Point } from '@/core/Grid';
 import { newRunState, type RunState } from '@/state/RunState';
@@ -30,9 +30,16 @@ interface DungeonSceneData {
 }
 
 const PLAYER_FRAME = CharsSheet.player;
-// v2: enemies are goblins (chars sheet col 0 row 3). The data model still
-// uses the "rat" kind; we rename in iteration 2 along with proper monster art.
 const ENEMY_FRAME = CharsSheet.goblin;
+const STEP_TWEEN_MS = 130;
+const AUTO_STEP_INTERVAL_MS = 150; // > STEP_TWEEN_MS so steps don't pile up mid-animation
+
+/**
+ * Helper: world pixel coords of a tile's center.
+ */
+function tileToWorld(x: number, y: number): { x: number; y: number } {
+  return { x: x * TILE_SIZE + TILE_SIZE / 2, y: y * TILE_SIZE + TILE_SIZE / 2 };
+}
 
 export class DungeonScene extends Phaser.Scene {
   private rng!: Rng;
@@ -43,9 +50,10 @@ export class DungeonScene extends Phaser.Scene {
   private enemies: Enemy[] = [];
   private runState!: RunState;
 
-  private tileSprites: Phaser.GameObjects.Image[][] = [];
   private playerSprite!: Phaser.GameObjects.Image;
   private enemySprites = new Map<number, Phaser.GameObjects.Image>();
+  private hoverHighlight!: Phaser.GameObjects.Rectangle;
+  private destinationMarker!: Phaser.GameObjects.Rectangle;
 
   private hpText!: Phaser.GameObjects.Text;
   private floorText!: Phaser.GameObjects.Text;
@@ -54,7 +62,6 @@ export class DungeonScene extends Phaser.Scene {
 
   private autoPath: Point[] = [];
   private autoStepTimer = 0;
-  private camOffset = { x: 0, y: 0 };
 
   constructor() {
     super(SCENE_KEYS.Dungeon);
@@ -63,8 +70,6 @@ export class DungeonScene extends Phaser.Scene {
   create(data: DungeonSceneData): void {
     const services = getServices(this);
     services.audio.playMusic('dungeon');
-
-    this.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, COLORS.bg);
 
     this.runState =
       data.resume && services.save.loadRun()
@@ -76,7 +81,6 @@ export class DungeonScene extends Phaser.Scene {
     this.turnEngine = new TurnEngine();
     this.dungeon = generateBspDungeon(DUNGEON_W, DUNGEON_H, this.rng);
 
-    // First time entering: align run state to the generated dungeon.
     if (!data.resume) {
       this.runState.playerPos = { ...this.dungeon.playerStart };
     }
@@ -85,17 +89,20 @@ export class DungeonScene extends Phaser.Scene {
 
     this.spawnEnemies();
     this.drawTiles();
+    this.drawHoverAndMarker();
     this.drawActors();
     this.drawHud();
+    this.setupCamera();
 
     this.turnEngine.onWorldTick(() => this.runEnemyTurns());
 
-    // Input
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => this.onClick(p));
+    this.input.on('pointermove', (p: Phaser.Input.Pointer) => this.onMouseMove(p));
     this.input.keyboard?.on('keydown', (e: KeyboardEvent) => this.onKey(e));
 
     services.save.saveRun(this.runState);
     this.log(`You enter the dungeon. Seed: ${this.runState.seed}.`);
+    void COLORS;
   }
 
   override update(_time: number, delta: number): void {
@@ -105,16 +112,29 @@ export class DungeonScene extends Phaser.Scene {
         const next = this.autoPath.shift();
         if (next) {
           this.tryStep(next);
-          this.autoStepTimer = 110;
+          this.autoStepTimer = AUTO_STEP_INTERVAL_MS;
+        }
+        if (this.autoPath.length === 0) {
+          this.destinationMarker.setVisible(false);
         }
       }
     }
   }
 
+  // ---------- Camera ----------
+
+  private setupCamera(): void {
+    const worldW = this.dungeon.tiles.width * TILE_SIZE;
+    const worldH = this.dungeon.tiles.height * TILE_SIZE;
+    const cam = this.cameras.main;
+    cam.setBounds(0, 0, worldW, worldH);
+    cam.startFollow(this.playerSprite, true, 0.15, 0.15);
+    cam.setBackgroundColor(COLORS.bg);
+  }
+
   // ---------- World generation & rendering ----------
 
   private spawnEnemies(): void {
-    // Place 1 rat per room beyond the first, up to 8 rats.
     const candidates = this.dungeon.rooms.slice(1, 9);
     for (const room of candidates) {
       const rx = this.rng.intInclusive(room.x1, room.x2);
@@ -123,8 +143,8 @@ export class DungeonScene extends Phaser.Scene {
       const enemy = new Enemy(
         { x: rx, y: ry },
         { hp: 5, hpMax: 5, power: 2, armor: 0 },
-        'rat',
-        'Giant Rat',
+        'goblin',
+        'Goblin',
         new RatAi(),
       );
       this.enemies.push(enemy);
@@ -132,17 +152,14 @@ export class DungeonScene extends Phaser.Scene {
   }
 
   private drawTiles(): void {
-    // Compute a camera offset so the player starts roughly centered.
-    this.camOffset = this.computeCamOffset(this.player.pos);
-    this.tileSprites = [];
-    // v2 dungeon visuals use palette-tinted rectangles for walls/floors —
-    // proper Kenney stone tiles will replace these once frames are picked
-    // via the debug scene. The data layer (TILES[kind]) is unchanged.
+    // v2 dungeon visuals: palette-tinted rectangles for walls/floors. Proper
+    // Kenney stone tiles will replace these once frames are picked via the
+    // debug scene. Tile sprites live in WORLD coordinates — Phaser's main
+    // camera follows the player to scroll the view.
     for (let y = 0; y < this.dungeon.tiles.height; y++) {
-      this.tileSprites[y] = [];
       for (let x = 0; x < this.dungeon.tiles.width; x++) {
         const kind = this.dungeon.tiles.get(x, y);
-        const [sx, sy] = this.toScreen(x, y);
+        const w = tileToWorld(x, y);
         let color: number;
         switch (kind) {
           case TileKind.Wall:
@@ -163,33 +180,42 @@ export class DungeonScene extends Phaser.Scene {
           default:
             color = 0x4a4a52;
         }
-        const rect = this.add
-          .rectangle(sx, sy, TILE_SIZE, TILE_SIZE, color)
-          .setOrigin(0.5);
-        if (kind === TileKind.Floor) {
-          rect.setStrokeStyle(1, 0x4a444f);
-        } else if (kind === TileKind.Wall) {
-          rect.setStrokeStyle(1, 0x1a1a22);
-        }
-        // Cast: rectangles aren't Images but our cleanup logic only calls
-        // setPosition / destroy, both shared on GameObject.
-        this.tileSprites[y]![x] = rect as unknown as Phaser.GameObjects.Image;
-        // Use def.iconFrame to silence unused-var when we re-wire to Kenney tiles.
+        const rect = this.add.rectangle(w.x, w.y, TILE_SIZE, TILE_SIZE, color).setOrigin(0.5);
+        if (kind === TileKind.Floor) rect.setStrokeStyle(1, 0x4a444f);
+        else if (kind === TileKind.Wall) rect.setStrokeStyle(1, 0x1a1a22);
         void TILES[kind].iconFrame;
       }
     }
   }
 
+  private drawHoverAndMarker(): void {
+    this.hoverHighlight = this.add
+      .rectangle(0, 0, TILE_SIZE, TILE_SIZE, 0xffffff, 0)
+      .setStrokeStyle(2, 0xffd76a, 0.85)
+      .setOrigin(0.5)
+      .setDepth(8)
+      .setVisible(false);
+
+    this.destinationMarker = this.add
+      .rectangle(0, 0, TILE_SIZE - 4, TILE_SIZE - 4, 0xd4a24c, 0.18)
+      .setStrokeStyle(2, 0xd4a24c, 1)
+      .setOrigin(0.5)
+      .setDepth(8)
+      .setVisible(false);
+  }
+
   private drawActors(): void {
+    const pw = tileToWorld(this.player.pos.x, this.player.pos.y);
     this.playerSprite = this.add
-      .image(...this.toScreen(this.player.pos.x, this.player.pos.y), ASSET_KEYS.sprites.chars, PLAYER_FRAME)
+      .image(pw.x, pw.y, ASSET_KEYS.sprites.chars, PLAYER_FRAME)
       .setScale(RENDER_SCALE)
       .setOrigin(0.5)
       .setDepth(10);
 
     for (const e of this.enemies) {
+      const ew = tileToWorld(e.pos.x, e.pos.y);
       const s = this.add
-        .image(...this.toScreen(e.pos.x, e.pos.y), ASSET_KEYS.sprites.chars, ENEMY_FRAME)
+        .image(ew.x, ew.y, ASSET_KEYS.sprites.chars, ENEMY_FRAME)
         .setScale(RENDER_SCALE)
         .setOrigin(0.5)
         .setDepth(9);
@@ -209,20 +235,83 @@ export class DungeonScene extends Phaser.Scene {
       .setOrigin(1, 0)
       .setScrollFactor(0)
       .setDepth(100);
+    // Log: bottom-left anchored, grows UP so it never collides with the
+    // controls hint at GAME_HEIGHT - 18. Word-wrap stays clear of the right-
+    // side HUD icons.
     this.logText = this.add
-      .text(8, GAME_HEIGHT - 80, '', {
+      .text(8, GAME_HEIGHT - 36, '', {
         fontFamily: 'monospace',
         fontSize: '12px',
         color: '#e5e3d8',
-        wordWrap: { width: GAME_WIDTH - 16 },
+        wordWrap: { width: GAME_WIDTH - 200 },
         ...stroke,
       })
-      .setOrigin(0, 0)
+      .setOrigin(0, 1)
       .setScrollFactor(0)
       .setDepth(100);
 
+    this.drawHudIcons();
     this.drawControlsHint();
     this.refreshHud();
+  }
+
+  private drawHudIcons(): void {
+    const items: Array<{ frame: number; key: string; tooltip: string; onClick: () => void }> = [
+      {
+        frame: UiLarge.buttonGrey,
+        key: 'I',
+        tooltip: 'Inventory (i)',
+        onClick: () => this.scene.launch(SCENE_KEYS.Inventory),
+      },
+      {
+        frame: UiLarge.buttonGrey,
+        key: 'C',
+        tooltip: 'Character (c)',
+        onClick: () => this.scene.launch(SCENE_KEYS.Character),
+      },
+      {
+        frame: UiLarge.buttonGrey,
+        key: '≡',
+        tooltip: 'Pause (esc)',
+        onClick: () => {
+          this.scene.launch(SCENE_KEYS.Pause);
+          this.scene.pause();
+        },
+      },
+    ];
+    let x = GAME_WIDTH - 24;
+    const y = 38;
+    for (const it of items) {
+      const slice = this.add
+        .nineslice(x, y, ASSET_KEYS.ui.large, it.frame, 36, 36, 6, 6, 6, 6)
+        .setOrigin(0.5)
+        .setScrollFactor(0)
+        .setDepth(100)
+        .setInteractive({ useHandCursor: true });
+      slice.on('pointerover', () => slice.setAlpha(0.9));
+      slice.on('pointerout', () => slice.setAlpha(1));
+      slice.on('pointerdown', () => slice.setAlpha(0.78));
+      slice.on('pointerup', () => {
+        slice.setAlpha(1);
+        try {
+          getServices(this).audio.playSfx(ASSET_KEYS.audio.sfxClick);
+        } catch {
+          /* no-op in test envs */
+        }
+        it.onClick();
+      });
+      this.add
+        .text(x, y, it.key, {
+          fontFamily: 'monospace',
+          fontSize: '15px',
+          color: '#3a2a1f',
+          fontStyle: 'bold',
+        })
+        .setOrigin(0.5)
+        .setScrollFactor(0)
+        .setDepth(101);
+      x -= 42;
+    }
   }
 
   private drawControlsHint(): void {
@@ -230,9 +319,6 @@ export class DungeonScene extends Phaser.Scene {
     const items: Array<[number, string]> = [
       [Inputs.mouseLeft, 'path'],
       [Inputs.arrowUp, 'step'],
-      [Inputs.keyEsc, 'pause'],
-      [Inputs.keyI, 'inv'],
-      [Inputs.keyC, 'char'],
     ];
     let cx = 8;
     for (const [icon, label] of items) {
@@ -271,46 +357,34 @@ export class DungeonScene extends Phaser.Scene {
     this.refreshHud();
   }
 
-  // ---------- Coordinate plumbing ----------
+  // ---------- Animation helpers ----------
 
-  private toScreen(x: number, y: number): [number, number] {
-    return [
-      (x - this.camOffset.x) * TILE_SIZE + TILE_SIZE / 2,
-      (y - this.camOffset.y) * TILE_SIZE + TILE_SIZE / 2,
-    ];
+  /** Tween a sprite to the given tile. Logical state should already reflect the move. */
+  private tweenTo(sprite: Phaser.GameObjects.Image, tile: Point): void {
+    const w = tileToWorld(tile.x, tile.y);
+    if (sprite.x === w.x && sprite.y === w.y) return;
+    this.tweens.add({
+      targets: sprite,
+      x: w.x,
+      y: w.y,
+      duration: STEP_TWEEN_MS,
+      ease: 'Quad.easeOut',
+    });
   }
 
-  private fromScreen(sx: number, sy: number): Point {
-    return {
-      x: Math.floor(sx / TILE_SIZE) + this.camOffset.x,
-      y: Math.floor(sy / TILE_SIZE) + this.camOffset.y,
-    };
-  }
-
-  private computeCamOffset(focus: Point): { x: number; y: number } {
-    const halfW = Math.floor(GAME_WIDTH / TILE_SIZE / 2);
-    const halfH = Math.floor(GAME_HEIGHT / TILE_SIZE / 2);
-    const ox = Math.max(0, Math.min(this.dungeon.tiles.width - GAME_WIDTH / TILE_SIZE, focus.x - halfW));
-    const oy = Math.max(0, Math.min(this.dungeon.tiles.height - GAME_HEIGHT / TILE_SIZE, focus.y - halfH));
-    return { x: Math.floor(ox), y: Math.floor(oy) };
-  }
-
-  private rerenderPositions(): void {
-    this.camOffset = this.computeCamOffset(this.player.pos);
-    for (let y = 0; y < this.dungeon.tiles.height; y++) {
-      const row = this.tileSprites[y];
-      if (!row) continue;
-      for (let x = 0; x < this.dungeon.tiles.width; x++) {
-        const s = row[x];
-        if (!s) continue;
-        s.setPosition(...this.toScreen(x, y));
-      }
-    }
-    this.playerSprite.setPosition(...this.toScreen(this.player.pos.x, this.player.pos.y));
-    for (const e of this.enemies) {
-      const s = this.enemySprites.get(e.id);
-      if (s) s.setPosition(...this.toScreen(e.pos.x, e.pos.y));
-    }
+  /** Quick "lunge" toward a target tile and back — used for bump attacks. */
+  private lungeAt(sprite: Phaser.GameObjects.Image, target: Point): void {
+    const from = { x: sprite.x, y: sprite.y };
+    const to = tileToWorld(target.x, target.y);
+    const mid = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
+    this.tweens.add({
+      targets: sprite,
+      x: mid.x,
+      y: mid.y,
+      duration: 70,
+      yoyo: true,
+      ease: 'Quad.easeOut',
+    });
   }
 
   // ---------- Game logic ----------
@@ -325,9 +399,27 @@ export class DungeonScene extends Phaser.Scene {
     return this.enemies.find((e) => e.alive && e.pos.x === x && e.pos.y === y) ?? null;
   }
 
+  private worldPointToTile(worldX: number, worldY: number): Point {
+    return { x: Math.floor(worldX / TILE_SIZE), y: Math.floor(worldY / TILE_SIZE) };
+  }
+
+  private onMouseMove(p: Phaser.Input.Pointer): void {
+    const tile = this.worldPointToTile(p.worldX, p.worldY);
+    if (!this.dungeon.tiles.inBounds(tile.x, tile.y)) {
+      this.hoverHighlight.setVisible(false);
+      return;
+    }
+    const w = tileToWorld(tile.x, tile.y);
+    this.hoverHighlight.setPosition(w.x, w.y).setVisible(true);
+    // Hover color: gold if walkable / has enemy (a valid target), red-tinted if blocked.
+    const hasEnemy = !!this.enemyAt(tile.x, tile.y);
+    const blocked = !this.isWalkable(tile.x, tile.y) && !hasEnemy;
+    this.hoverHighlight.setStrokeStyle(2, blocked ? 0xb84a4a : 0xffd76a, 0.85);
+  }
+
   private onClick(p: Phaser.Input.Pointer): void {
     if (!this.player.alive) return;
-    const target = this.fromScreen(p.worldX, p.worldY);
+    const target = this.worldPointToTile(p.worldX, p.worldY);
     if (!this.dungeon.tiles.inBounds(target.x, target.y)) return;
 
     const enemy = this.enemyAt(target.x, target.y);
@@ -335,8 +427,13 @@ export class DungeonScene extends Phaser.Scene {
       ? findPathToBump(this.player.pos, target, (x, y) => this.isWalkable(x, y) && !this.enemyAt(x, y))
       : findPath(this.player.pos, target, (x, y) => this.isWalkable(x, y) && !this.enemyAt(x, y));
     if (path.length <= 1) return;
-    this.autoPath = path.slice(1); // drop the start, which is our current position
+    this.autoPath = path.slice(1);
     this.autoStepTimer = 0;
+
+    // Show destination marker on the goal tile.
+    const goal = path[path.length - 1]!;
+    const w = tileToWorld(goal.x, goal.y);
+    this.destinationMarker.setPosition(w.x, w.y).setVisible(true);
   }
 
   private onKey(e: KeyboardEvent): void {
@@ -403,6 +500,7 @@ export class DungeonScene extends Phaser.Scene {
         return;
     }
     this.autoPath = [];
+    this.destinationMarker.setVisible(false);
     this.tryStep({ x: this.player.pos.x + dx, y: this.player.pos.y + dy });
   }
 
@@ -410,7 +508,6 @@ export class DungeonScene extends Phaser.Scene {
     if (!this.player.alive) return;
     if (chebyshev(this.player.pos, target) > 1) return;
 
-    // Same tile = wait.
     if (target.x === this.player.pos.x && target.y === this.player.pos.y) {
       this.endRound(() => {});
       return;
@@ -424,12 +521,12 @@ export class DungeonScene extends Phaser.Scene {
       return;
     }
 
-    // Walking onto stairs ends the floor (v1: returns to town).
     const tile = this.dungeon.tiles.get(target.x, target.y);
     if (tile === TileKind.StairsDown) {
       this.log('You climb back up to Tallowmark with what you found.');
       this.player.pos = { ...target };
       this.runState.playerPos = { ...target };
+      this.tweenTo(this.playerSprite, target);
       this.completeRunSurvived();
       return;
     }
@@ -437,6 +534,7 @@ export class DungeonScene extends Phaser.Scene {
     this.endRound(() => {
       this.player.pos = { ...target };
       this.runState.playerPos = { ...target };
+      this.tweenTo(this.playerSprite, target);
     });
   }
 
@@ -448,7 +546,6 @@ export class DungeonScene extends Phaser.Scene {
     this.cleanupDeadEnemies();
     this.runState.player = { ...this.player.stats };
     getServices(this).save.saveRun(this.runState);
-    this.rerenderPositions();
     this.refreshHud();
     if (!this.player.alive) {
       this.handlePlayerDeath();
@@ -456,6 +553,7 @@ export class DungeonScene extends Phaser.Scene {
   }
 
   private playerAttack(enemy: Enemy): void {
+    this.lungeAt(this.playerSprite, enemy.pos);
     const result = this.combat.applyDamage(enemy.stats, this.combat.resolveAttack(this.player.stats, enemy.stats));
     this.log(`You hit the ${enemy.displayName} for ${result.damage}.`);
     if (enemy.stats.hp <= 0) {
@@ -471,6 +569,8 @@ export class DungeonScene extends Phaser.Scene {
       enemyAt: (x, y) => this.enemyAt(x, y),
       playerPos: this.player.pos,
       attackPlayer: (attacker) => {
+        const sprite = this.enemySprites.get(attacker.id);
+        if (sprite) this.lungeAt(sprite, this.player.pos);
         const result = this.combat.applyDamage(
           this.player.stats,
           this.combat.resolveAttack(attacker.stats, this.player.stats),
@@ -483,6 +583,8 @@ export class DungeonScene extends Phaser.Scene {
       },
       moveEnemy: (enemy, to) => {
         enemy.pos = { ...to };
+        const sprite = this.enemySprites.get(enemy.id);
+        if (sprite) this.tweenTo(sprite, to);
       },
     };
     for (const e of this.enemies) {
@@ -497,7 +599,14 @@ export class DungeonScene extends Phaser.Scene {
       if (!e.alive) {
         const s = this.enemySprites.get(e.id);
         if (s) {
-          s.destroy();
+          // Quick fade-out before destroying for a nicer feel.
+          this.tweens.add({
+            targets: s,
+            alpha: 0,
+            scale: RENDER_SCALE * 1.5,
+            duration: 200,
+            onComplete: () => s.destroy(),
+          });
           this.enemySprites.delete(e.id);
         }
       }
@@ -507,13 +616,13 @@ export class DungeonScene extends Phaser.Scene {
 
   private handlePlayerDeath(): void {
     this.autoPath = [];
+    this.destinationMarker.setVisible(false);
     this.runState.ended = { reason: 'death', turn: this.runState.turn };
     getServices(this).save.saveRun(this.runState);
     this.time.delayedCall(400, () => this.toDeathSummary());
   }
 
   private completeRunSurvived(): void {
-    // v1: surviving / climbing stairs returns you to town and grants meta-currency.
     const services = getServices(this);
     const reward = 10 + Math.max(0, 30 - Math.floor(this.runState.turn / 5));
     services.setPersistent((s) => {
@@ -528,7 +637,7 @@ export class DungeonScene extends Phaser.Scene {
     this.scene.start(SCENE_KEYS.DeathSummary, {
       turn: this.runState.turn,
       floor: this.runState.floor,
-      kills: 0, // TODO: track in iteration 2+
+      kills: 0,
     });
   }
 }

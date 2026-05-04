@@ -145,6 +145,29 @@ These run alongside the iterations rather than slotting into one of them:
 - **Accessibility.** Colorblind-safe palette options; remappable keys; reduced-motion mode (already trivial because we're turn-based).
 - **CI & quality.** Lint + typecheck + unit + E2E gate every PR. Coverage target 70% for `core/`, no target for scenes.
 
+### Tooling — level editor & frame inspector
+
+Hand-authored maps need a way to be edited *as you play* — typing tile coordinates by hand is the wrong workflow. The roadmap here is intentionally lightweight; we keep tooling proportional to need.
+
+- **v1 (already shipped):** `DebugSheetScene` (F9 in dev) lets you visually pick a frame from any loaded spritesheet. Maps directly into the constants in `src/world/FrameCatalog.ts`.
+- **v2 — In-game dev paint mode (target: alongside iteration 2):** small toggleable mode in `TownScene` (and any future hand-authored scene) that lets you:
+  - Hover a tile to see its current frame index.
+  - Pick a tile from a palette overlay (driven by FrameCatalog).
+  - Click-and-drag to paint that frame onto the map.
+  - Save to a JSON map file (`public/maps/town.json`); the scene loads from that JSON at runtime.
+  - Dev-only: gated by `import.meta.env.DEV` so it never reaches production builds.
+  - Single terrain layer; no NPCs, no objects. This is intentionally minimum-viable — the win is not writing a great editor, it's killing the "edit FrameCatalog → reload → eyeball" cycle.
+- **v3 — Switch to [Tiled](https://www.mapeditor.org/):** as soon as iteration 3 wants hand-authored dungeon room templates and NPC placement, the in-game painter stops being enough. Tiled gives us:
+  - Multi-layer maps (terrain / decoration / collision / objects).
+  - Object layers — drop NPCs / doors / triggers with custom properties (dialogue, item id, faction) per object.
+  - Auto-tiling — paint a wall and it picks the right corner / edge / interior frame automatically. Solves the wall-frame guessing problem permanently.
+  - Tile properties (walkable, opaque, damage) defined once on the tileset, not in code.
+  - Phaser 3 has first-party support: `this.load.tilemapTiledJSON()` + `this.add.tilemap()`.
+  - Cost: contributors install the Tiled desktop app (~30 MB, free), and we re-describe each Kenney sheet once as a tileset (`.tsx` file). The town moves from `add.image()` per tile to a tilemap layer.
+  - When we move, the rpg-pack section of `FrameCatalog` largely retires — Tiled stores frames internally; you reference tiles by layer + position. `CharsSheet` (sprites for player / enemies / NPCs) stays.
+
+The plan is *not* "build an in-game painter, then build it bigger, then build it bigger." The in-game painter exists only to unblock iteration 2's town iteration; once we need objects or auto-tiling we switch to Tiled and never look back.
+
 ---
 
 ## Open questions (parked)

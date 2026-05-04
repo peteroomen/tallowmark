@@ -8,11 +8,12 @@ import {
   SCENE_KEYS,
   TILE_SIZE,
 } from '@/config';
-import { CharsSheet, Inputs, TilesRPG } from '@/world/FrameCatalog';
+import { CharsSheet, Inputs, TilesRPG, UiLarge } from '@/world/FrameCatalog';
 import { getServices } from '@/services';
 
 const TOWN_W = Math.floor(GAME_WIDTH / TILE_SIZE);
 const TOWN_H = Math.floor(GAME_HEIGHT / TILE_SIZE);
+const STEP_TWEEN_MS = 130;
 
 interface Building {
   x: number;
@@ -20,9 +21,7 @@ interface Building {
   w: number;
   h: number;
   label: string;
-  /** Roof color (hex) — drawn as the top half of the building. */
   roof: number;
-  /** Wall color (hex) — drawn as the bottom half. */
   wall: number;
 }
 
@@ -33,24 +32,28 @@ const BUILDINGS: Building[] = [
   { x: 2, y: 11, w: 5, h: 3, label: 'Upgrade Shrine', roof: 0x9a7a3a, wall: 0xc9a06b },
 ];
 
+// One multi-tile lake placed in the open band between the Upgrade Shrine
+// (left) and the Dungeon Entrance (right), below the main horizontal path.
+// Drawn as a contiguous block so it reads as one body of water rather than
+// scattered fragments.
+const LAKE = { x: 8, y: 10, w: 5, h: 4 };
+
 const DUNGEON_ENTRANCE = { x: 17, y: 11, w: 4, h: 3 };
 
 /**
  * Tallowmark — the hub town.
  *
- * Floor uses confirmed Kenney rpg-pack grass tiles. Buildings and the dungeon
- * entrance are drawn as palette-tinted rectangles for v2 — they read as
- * "buildings" without relying on yet-to-be-confirmed wall/roof frames.
- *
- * Trees use confirmed rpg-pack tree frames. Player uses the confirmed warrior
- * frame from the chars-pack.
- *
- * Iteration target: replace the rectangle buildings with proper Kenney
- * wall/roof tiles once frames are picked via DebugSheetScene (F9 in dev).
+ * Floor: confirmed Kenney rpg-pack grass tiles.
+ * Buildings, lake, dungeon entrance: palette-tinted rectangles for v2 (real
+ * Kenney building tiles arrive in iteration 2 once the in-game paint mode
+ * is wired up).
+ * Player: confirmed Kenney warrior sprite.
+ * Movement: tweens between tiles for a smoother feel.
  */
 export class TownScene extends Phaser.Scene {
   private playerSprite!: Phaser.GameObjects.Image;
   private playerTile = { x: 11, y: 8 };
+  private moving = false;
 
   constructor() {
     super(SCENE_KEYS.Town);
@@ -61,10 +64,10 @@ export class TownScene extends Phaser.Scene {
     services.audio.playMusic('town');
 
     this.drawGrass();
+    this.drawLake();
     this.drawPaths();
     for (const b of BUILDINGS) this.drawBuilding(b);
     this.drawDungeonEntrance();
-    this.drawTrees();
     this.drawPlayer();
     this.drawHud();
 
@@ -76,22 +79,43 @@ export class TownScene extends Phaser.Scene {
   // ---------- World rendering ----------
 
   private drawGrass(): void {
+    // Plain grass — no checkerboard variation for now (the alternate frame
+    // wasn't actually grass and rendered as fragments). One clean field.
     for (let y = 0; y < TOWN_H; y++) {
       for (let x = 0; x < TOWN_W; x++) {
-        const frame = (x * 31 + y * 17) % 11 === 0 ? TilesRPG.grassAlt : TilesRPG.grass;
         this.add
-          .image(x * TILE_SIZE + TILE_SIZE / 2, y * TILE_SIZE + TILE_SIZE / 2, ASSET_KEYS.sprites.rpg, frame)
+          .image(
+            x * TILE_SIZE + TILE_SIZE / 2,
+            y * TILE_SIZE + TILE_SIZE / 2,
+            ASSET_KEYS.sprites.rpg,
+            TilesRPG.grass,
+          )
           .setScale(RENDER_SCALE);
       }
     }
   }
 
-  private drawPaths(): void {
-    // Horizontal stone path across the middle, vertical spur to the dungeon.
-    const pathRow = 8;
-    for (let x = 0; x < TOWN_W; x++) {
-      this.placeTile(x, pathRow, TilesRPG.dirt);
+  private drawLake(): void {
+    // One big body of water — flat blue rectangle with a darker outline so it
+    // reads as a coherent lake instead of dozens of scattered shore-edge tiles.
+    const px = LAKE.x * TILE_SIZE;
+    const py = LAKE.y * TILE_SIZE;
+    const pw = LAKE.w * TILE_SIZE;
+    const ph = LAKE.h * TILE_SIZE;
+    this.add
+      .rectangle(px + pw / 2, py + ph / 2, pw - 4, ph - 4, 0x4a8aa8)
+      .setStrokeStyle(3, 0x2a5870);
+    // Subtle ripple lines.
+    for (let i = 0; i < 4; i++) {
+      const rx = px + 8 + Math.floor(((i * 17) % (pw - 64)));
+      const ry = py + 12 + i * 28;
+      this.add.rectangle(rx, ry, 24, 2, 0x6aa8c8).setOrigin(0, 0.5);
     }
+  }
+
+  private drawPaths(): void {
+    const pathRow = 8;
+    for (let x = 0; x < TOWN_W; x++) this.placeTile(x, pathRow, TilesRPG.dirt);
     for (let y = pathRow; y < DUNGEON_ENTRANCE.y; y++) {
       this.placeTile(DUNGEON_ENTRANCE.x + 1, y, TilesRPG.dirt);
     }
@@ -103,29 +127,27 @@ export class TownScene extends Phaser.Scene {
     const pw = b.w * TILE_SIZE;
     const ph = b.h * TILE_SIZE;
 
-    // Roof (top 40%)
     const roofH = Math.floor(ph * 0.4);
     this.add
       .rectangle(px + pw / 2, py + roofH / 2, pw - 4, roofH - 2, b.roof)
       .setStrokeStyle(2, 0x1a1a24);
-
-    // Wall (bottom 60%)
     this.add
       .rectangle(px + pw / 2, py + roofH + (ph - roofH) / 2, pw - 4, ph - roofH - 2, b.wall)
       .setStrokeStyle(2, 0x1a1a24);
 
-    // Door (centered on bottom)
     const doorH = TILE_SIZE;
     this.add
       .rectangle(px + pw / 2, py + ph - doorH / 2 - 4, TILE_SIZE * 0.7, doorH, 0x3a2a1f)
       .setStrokeStyle(2, 0x1a1a24);
 
-    // Two windows
     const winY = py + roofH + (ph - roofH) * 0.35;
-    this.add.rectangle(px + pw * 0.25, winY, TILE_SIZE * 0.5, TILE_SIZE * 0.5, 0xa0c8d8).setStrokeStyle(2, 0x1a1a24);
-    this.add.rectangle(px + pw * 0.75, winY, TILE_SIZE * 0.5, TILE_SIZE * 0.5, 0xa0c8d8).setStrokeStyle(2, 0x1a1a24);
+    this.add
+      .rectangle(px + pw * 0.25, winY, TILE_SIZE * 0.5, TILE_SIZE * 0.5, 0xa0c8d8)
+      .setStrokeStyle(2, 0x1a1a24);
+    this.add
+      .rectangle(px + pw * 0.75, winY, TILE_SIZE * 0.5, TILE_SIZE * 0.5, 0xa0c8d8)
+      .setStrokeStyle(2, 0x1a1a24);
 
-    // Label
     this.add
       .text(px + pw / 2, py - 6, b.label, {
         fontFamily: 'monospace',
@@ -145,9 +167,7 @@ export class TownScene extends Phaser.Scene {
     const pw = e.w * TILE_SIZE;
     const ph = e.h * TILE_SIZE;
 
-    // Stone arch — dark grey rectangle with darker entrance cavity
     this.add.rectangle(px + pw / 2, py + ph / 2, pw - 4, ph - 2, 0x4a4a52).setStrokeStyle(3, 0x1a1a24);
-    // Cavity
     this.add
       .rectangle(px + pw / 2, py + ph * 0.6, TILE_SIZE * 1.5, TILE_SIZE * 1.8, 0x14101a)
       .setStrokeStyle(2, 0x1a1a24);
@@ -162,21 +182,6 @@ export class TownScene extends Phaser.Scene {
         fontStyle: 'bold',
       })
       .setOrigin(0.5, 1);
-  }
-
-  private drawTrees(): void {
-    const trees: Array<[number, number, number]> = [
-      [1, 1, TilesRPG.tree],
-      [22, 1, TilesRPG.treeDark],
-      [22, 6, TilesRPG.tree],
-      [1, 13, TilesRPG.treeDark],
-      [0, 11, TilesRPG.tree],
-      [8, 12, TilesRPG.treeDark],
-      [14, 12, TilesRPG.tree],
-    ];
-    for (const [x, y, frame] of trees) {
-      if (this.inTownBounds(x, y)) this.placeTile(x, y, frame);
-    }
   }
 
   private drawPlayer(): void {
@@ -202,7 +207,7 @@ export class TownScene extends Phaser.Scene {
       .setOrigin(0, 0)
       .setDepth(100);
     this.add
-      .text(8, 28, `Souls: ${services.persistent.metaCurrency}`, {
+      .text(8, 28, `Embers: ${services.persistent.metaCurrency}`, {
         fontFamily: 'monospace',
         fontSize: '12px',
         color: '#e5e3d8',
@@ -212,7 +217,58 @@ export class TownScene extends Phaser.Scene {
       .setOrigin(0, 0)
       .setDepth(100);
 
-    // Footer with input-prompt sprites.
+    this.drawHudIcons();
+    this.drawFooter();
+    void COLORS;
+  }
+
+  private drawHudIcons(): void {
+    const items: Array<{ frame: number; key: string; onClick: () => void }> = [
+      {
+        frame: UiLarge.buttonGrey,
+        key: 'I',
+        onClick: () => this.scene.launch(SCENE_KEYS.Inventory),
+      },
+      {
+        frame: UiLarge.buttonGrey,
+        key: 'C',
+        onClick: () => this.scene.launch(SCENE_KEYS.Character),
+      },
+    ];
+    let x = GAME_WIDTH - 24;
+    const y = 24;
+    for (const it of items) {
+      const slice = this.add
+        .nineslice(x, y, ASSET_KEYS.ui.large, it.frame, 36, 36, 6, 6, 6, 6)
+        .setOrigin(0.5)
+        .setDepth(100)
+        .setInteractive({ useHandCursor: true });
+      slice.on('pointerover', () => slice.setAlpha(0.9));
+      slice.on('pointerout', () => slice.setAlpha(1));
+      slice.on('pointerdown', () => slice.setAlpha(0.78));
+      slice.on('pointerup', () => {
+        slice.setAlpha(1);
+        try {
+          getServices(this).audio.playSfx(ASSET_KEYS.audio.sfxClick);
+        } catch {
+          /* test contexts */
+        }
+        it.onClick();
+      });
+      this.add
+        .text(x, y, it.key, {
+          fontFamily: 'monospace',
+          fontSize: '15px',
+          color: '#3a2a1f',
+          fontStyle: 'bold',
+        })
+        .setOrigin(0.5)
+        .setDepth(101);
+      x -= 42;
+    }
+  }
+
+  private drawFooter(): void {
     const footerY = GAME_HEIGHT - 18;
     let fx = 10;
     const addPrompt = (frame: number, text: string) => {
@@ -236,10 +292,9 @@ export class TownScene extends Phaser.Scene {
     };
     addPrompt(Inputs.mouseLeft, 'walk');
     addPrompt(Inputs.keyEsc, 'menu');
-    void COLORS;
   }
 
-  // ---------- Input handlers ----------
+  // ---------- Input ----------
 
   private onClick(p: Phaser.Input.Pointer): void {
     const tx = Math.floor(p.worldX / TILE_SIZE);
@@ -281,6 +336,12 @@ export class TownScene extends Phaser.Scene {
           this.promptDescend();
         }
         return;
+      case 'i':
+        this.scene.launch(SCENE_KEYS.Inventory);
+        return;
+      case 'c':
+        this.scene.launch(SCENE_KEYS.Character);
+        return;
       default:
         return;
     }
@@ -289,8 +350,19 @@ export class TownScene extends Phaser.Scene {
 
   private movePlayerTo(x: number, y: number): void {
     if (!this.inTownBounds(x, y)) return;
+    if (this.moving) return;
     this.playerTile = { x, y };
-    this.playerSprite.setPosition(x * TILE_SIZE + TILE_SIZE / 2, y * TILE_SIZE + TILE_SIZE / 2);
+    this.moving = true;
+    this.tweens.add({
+      targets: this.playerSprite,
+      x: x * TILE_SIZE + TILE_SIZE / 2,
+      y: y * TILE_SIZE + TILE_SIZE / 2,
+      duration: STEP_TWEEN_MS,
+      ease: 'Quad.easeOut',
+      onComplete: () => {
+        this.moving = false;
+      },
+    });
   }
 
   // ---------- Helpers ----------
