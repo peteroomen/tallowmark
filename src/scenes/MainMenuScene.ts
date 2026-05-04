@@ -33,7 +33,7 @@ export class MainMenuScene extends Phaser.Scene {
 
     const btnX = GAME_WIDTH / 2;
     let y = GAME_HEIGHT / 2 - 40;
-    const dy = 56;
+    const dy = 70;
 
     new KenneyButton({
       scene: this,

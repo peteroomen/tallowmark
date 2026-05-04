@@ -1,7 +1,14 @@
 import Phaser from 'phaser';
 import { SCENE_KEYS, ASSET_KEYS, COLORS, GAME_WIDTH, GAME_HEIGHT } from '@/config';
 
-const SPRITE_FRAME = { frameWidth: 16, frameHeight: 16, margin: 0, spacing: 1 };
+// rpg-pack, chars, indoors are the GUTTER versions of the source sheets:
+// 16x16 frames, 1px gutter between tiles.
+const SHEET_16_GUTTER = { frameWidth: 16, frameHeight: 16, margin: 0, spacing: 1 };
+
+// UI pack and input-prompts are the PACKED versions: no gutter, no margin.
+const UI_LARGE_PACKED = { frameWidth: 32, frameHeight: 32, margin: 0, spacing: 0 };
+const UI_SMALL_PACKED = { frameWidth: 16, frameHeight: 16, margin: 0, spacing: 0 };
+const INPUT_PACKED = { frameWidth: 16, frameHeight: 16, margin: 0, spacing: 0 };
 
 export class BootScene extends Phaser.Scene {
   constructor() {
@@ -11,28 +18,13 @@ export class BootScene extends Phaser.Scene {
   preload(): void {
     this.drawLoadingBar();
 
-    this.load.spritesheet(ASSET_KEYS.sprites.rpg, 'assets/sprites/rpg.png', SPRITE_FRAME);
-    this.load.spritesheet(ASSET_KEYS.sprites.chars, 'assets/sprites/chars.png', SPRITE_FRAME);
-    this.load.spritesheet(ASSET_KEYS.sprites.indoors, 'assets/sprites/indoors.png', SPRITE_FRAME);
+    this.load.spritesheet(ASSET_KEYS.sprites.rpg, 'assets/sprites/rpg.png', SHEET_16_GUTTER);
+    this.load.spritesheet(ASSET_KEYS.sprites.chars, 'assets/sprites/chars.png', SHEET_16_GUTTER);
+    this.load.spritesheet(ASSET_KEYS.sprites.indoors, 'assets/sprites/indoors.png', SHEET_16_GUTTER);
 
-    this.load.spritesheet(ASSET_KEYS.ui.large, 'assets/ui/ui_large.png', {
-      frameWidth: 32,
-      frameHeight: 32,
-      margin: 0,
-      spacing: 1,
-    });
-    this.load.spritesheet(ASSET_KEYS.ui.small, 'assets/ui/ui_small.png', {
-      frameWidth: 16,
-      frameHeight: 16,
-      margin: 0,
-      spacing: 1,
-    });
-    this.load.spritesheet(ASSET_KEYS.ui.inputs, 'assets/ui/inputs.png', {
-      frameWidth: 16,
-      frameHeight: 16,
-      margin: 0,
-      spacing: 1,
-    });
+    this.load.spritesheet(ASSET_KEYS.ui.large, 'assets/ui/ui_large.png', UI_LARGE_PACKED);
+    this.load.spritesheet(ASSET_KEYS.ui.small, 'assets/ui/ui_small.png', UI_SMALL_PACKED);
+    this.load.spritesheet(ASSET_KEYS.ui.inputs, 'assets/ui/inputs.png', INPUT_PACKED);
 
     this.load.audio(ASSET_KEYS.audio.musicMenu, 'assets/audio/music_menu.wav');
     this.load.audio(ASSET_KEYS.audio.musicTown, 'assets/audio/music_town.wav');

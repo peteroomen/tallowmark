@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
-import { ASSET_KEYS, COLORS } from '@/config';
+import { ASSET_KEYS } from '@/config';
+import { UiLarge } from '@/world/FrameCatalog';
 import { getServices } from '@/services';
 
 export interface KenneyButtonOptions {
@@ -7,61 +8,85 @@ export interface KenneyButtonOptions {
   x: number;
   y: number;
   width?: number;
+  height?: number;
   text: string;
   onClick: () => void;
+  /** Primary uses the brown wood frame; otherwise grey. */
   primary?: boolean;
 }
 
+const BORDER = 8;
+const DEFAULT_W = 240;
+const DEFAULT_H = 56;
+
 /**
- * Touch-friendly button rendered with a Kenney UI 9-slice panel and a label.
- * Hit target is at least 48×40 to satisfy mobile-first interaction.
+ * Touch-friendly button rendered using Phaser's built-in 9-slice on a single
+ * Kenney UI button frame. Corners stay crisp; the middle stretches.
+ *
+ * Hit target is the full panel; minimum 48px tall by default for touch use.
  */
 export class KenneyButton extends Phaser.GameObjects.Container {
-  private bg: Phaser.GameObjects.Rectangle;
-  private label: Phaser.GameObjects.Text;
-  private hoverTint = false;
+  private readonly slice: Phaser.GameObjects.NineSlice;
+  private readonly label: Phaser.GameObjects.Text;
+  private readonly hitW: number;
+  private readonly hitH: number;
 
   constructor(opts: KenneyButtonOptions) {
     super(opts.scene, opts.x, opts.y);
-    const w = Math.max(opts.width ?? 240, 96);
-    const h = 40;
-    const fillColor = opts.primary ? COLORS.accent : COLORS.panel;
-    const borderColor = COLORS.panelBorder;
+    this.hitW = opts.width ?? DEFAULT_W;
+    this.hitH = opts.height ?? DEFAULT_H;
+    const frame = opts.primary ? UiLarge.buttonBrown : UiLarge.buttonGrey;
 
-    this.bg = opts.scene.add
-      .rectangle(0, 0, w, h, fillColor)
-      .setStrokeStyle(2, borderColor)
-      .setOrigin(0.5);
+    this.slice = opts.scene.add.nineslice(
+      0,
+      0,
+      ASSET_KEYS.ui.large,
+      frame,
+      this.hitW,
+      this.hitH,
+      BORDER,
+      BORDER,
+      BORDER,
+      BORDER,
+    );
+    this.slice.setOrigin(0.5);
+    this.add(this.slice);
+
     this.label = opts.scene.add
       .text(0, 0, opts.text, {
         fontFamily: 'monospace',
         fontSize: '18px',
-        color: opts.primary ? '#1a1a24' : '#e5e3d8',
+        color: opts.primary ? '#3a2a1f' : '#e5e3d8',
+        fontStyle: opts.primary ? 'bold' : 'normal',
       })
       .setOrigin(0.5);
-    this.add([this.bg, this.label]);
+    this.add(this.label);
 
-    this.setSize(w, h);
-    this.setInteractive(new Phaser.Geom.Rectangle(-w / 2, -h / 2, w, h), Phaser.Geom.Rectangle.Contains);
+    this.setSize(this.hitW, this.hitH);
+    this.setInteractive(
+      new Phaser.Geom.Rectangle(-this.hitW / 2, -this.hitH / 2, this.hitW, this.hitH),
+      Phaser.Geom.Rectangle.Contains,
+    );
+
     this.on('pointerover', () => {
-      this.hoverTint = true;
-      this.bg.setFillStyle(opts.primary ? 0xe5b265 : 0x2a2a36);
+      this.slice.setAlpha(0.92);
       opts.scene.input.setDefaultCursor('pointer');
     });
     this.on('pointerout', () => {
-      this.hoverTint = false;
-      this.bg.setFillStyle(fillColor);
+      this.slice.setAlpha(1);
       opts.scene.input.setDefaultCursor('default');
     });
     this.on('pointerdown', () => {
-      this.bg.setFillStyle(opts.primary ? 0xb88a3a : 0x141420);
+      this.slice.setAlpha(0.78);
+      this.label.setY(2);
     });
     this.on('pointerup', () => {
-      this.bg.setFillStyle(this.hoverTint ? (opts.primary ? 0xe5b265 : 0x2a2a36) : fillColor);
+      this.slice.setAlpha(1);
+      this.label.setY(0);
       try {
         getServices(opts.scene).audio.playSfx(ASSET_KEYS.audio.sfxClick);
       } catch {
-        // services may not exist in test contexts
+        /* services not available in test contexts */
       }
       opts.onClick();
     });

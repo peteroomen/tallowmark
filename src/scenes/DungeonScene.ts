@@ -18,6 +18,7 @@ import { Enemy, type EnemyAiContext } from '@/entities/Enemy';
 import { RatAi } from '@/entities/ai/RatAi';
 import { generateBspDungeon, type GeneratedDungeon } from '@/world/Dungeon/BspGenerator';
 import { TileKind, TILES } from '@/world/Tile';
+import { CharsSheet, Inputs } from '@/world/FrameCatalog';
 import { findPath, findPathToBump } from '@/core/Pathfinding';
 import { chebyshev, type Point } from '@/core/Grid';
 import { newRunState, type RunState } from '@/state/RunState';
@@ -28,8 +29,10 @@ interface DungeonSceneData {
   resume?: boolean;
 }
 
-const PLAYER_FRAME = 0; // top-left of the character sheet
-const RAT_FRAME = 4 * 54 + 24; // a small creature frame on the chars sheet (approximate)
+const PLAYER_FRAME = CharsSheet.player;
+// v2: enemies are goblins (chars sheet col 0 row 3). The data model still
+// uses the "rat" kind; we rename in iteration 2 along with proper monster art.
+const ENEMY_FRAME = CharsSheet.goblin;
 
 export class DungeonScene extends Phaser.Scene {
   private rng!: Rng;
@@ -132,18 +135,47 @@ export class DungeonScene extends Phaser.Scene {
     // Compute a camera offset so the player starts roughly centered.
     this.camOffset = this.computeCamOffset(this.player.pos);
     this.tileSprites = [];
+    // v2 dungeon visuals use palette-tinted rectangles for walls/floors —
+    // proper Kenney stone tiles will replace these once frames are picked
+    // via the debug scene. The data layer (TILES[kind]) is unchanged.
     for (let y = 0; y < this.dungeon.tiles.height; y++) {
       this.tileSprites[y] = [];
       for (let x = 0; x < this.dungeon.tiles.width; x++) {
         const kind = this.dungeon.tiles.get(x, y);
-        const def = TILES[kind];
-        const sprite = this.add
-          .image(...this.toScreen(x, y), ASSET_KEYS.sprites.rpg, def.iconFrame)
-          .setScale(RENDER_SCALE)
+        const [sx, sy] = this.toScreen(x, y);
+        let color: number;
+        switch (kind) {
+          case TileKind.Wall:
+            color = 0x32323a;
+            break;
+          case TileKind.Floor:
+            color = 0x6a6470;
+            break;
+          case TileKind.StairsDown:
+            color = 0xd4a24c;
+            break;
+          case TileKind.StairsUp:
+            color = 0x9a988e;
+            break;
+          case TileKind.Door:
+            color = 0x6a4a2f;
+            break;
+          default:
+            color = 0x4a4a52;
+        }
+        const rect = this.add
+          .rectangle(sx, sy, TILE_SIZE, TILE_SIZE, color)
           .setOrigin(0.5);
-        // Draw a faint dark background for non-floor walls so unloaded frame indices still read.
-        if (kind === TileKind.Wall) sprite.setTint(0x6a6878);
-        this.tileSprites[y]![x] = sprite;
+        if (kind === TileKind.Floor) {
+          rect.setStrokeStyle(1, 0x4a444f);
+        } else if (kind === TileKind.Wall) {
+          rect.setStrokeStyle(1, 0x1a1a22);
+        }
+        // Cast: rectangles aren't Images but our cleanup logic only calls
+        // setPosition / destroy, both shared on GameObject.
+        this.tileSprites[y]![x] = rect as unknown as Phaser.GameObjects.Image;
+        // Use def.iconFrame to silence unused-var when we re-wire to Kenney tiles.
+        void TILES[kind].iconFrame;
       }
     }
   }
@@ -157,23 +189,23 @@ export class DungeonScene extends Phaser.Scene {
 
     for (const e of this.enemies) {
       const s = this.add
-        .image(...this.toScreen(e.pos.x, e.pos.y), ASSET_KEYS.sprites.chars, RAT_FRAME)
+        .image(...this.toScreen(e.pos.x, e.pos.y), ASSET_KEYS.sprites.chars, ENEMY_FRAME)
         .setScale(RENDER_SCALE)
         .setOrigin(0.5)
         .setDepth(9);
-      s.setTint(0xc06030);
       this.enemySprites.set(e.id, s);
     }
   }
 
   private drawHud(): void {
+    const stroke = { stroke: '#1a1a24', strokeThickness: 3 };
     this.hpText = this.add
-      .text(8, 8, '', { fontFamily: 'monospace', fontSize: '14px', color: '#e5e3d8' })
+      .text(8, 8, '', { fontFamily: 'monospace', fontSize: '14px', color: '#e5e3d8', ...stroke })
       .setOrigin(0, 0)
       .setScrollFactor(0)
       .setDepth(100);
     this.floorText = this.add
-      .text(GAME_WIDTH - 8, 8, '', { fontFamily: 'monospace', fontSize: '14px', color: '#d4a24c' })
+      .text(GAME_WIDTH - 8, 8, '', { fontFamily: 'monospace', fontSize: '14px', color: '#d4a24c', ...stroke })
       .setOrigin(1, 0)
       .setScrollFactor(0)
       .setDepth(100);
@@ -181,23 +213,49 @@ export class DungeonScene extends Phaser.Scene {
       .text(8, GAME_HEIGHT - 80, '', {
         fontFamily: 'monospace',
         fontSize: '12px',
-        color: '#9a988e',
+        color: '#e5e3d8',
         wordWrap: { width: GAME_WIDTH - 16 },
+        ...stroke,
       })
       .setOrigin(0, 0)
       .setScrollFactor(0)
       .setDepth(100);
 
-    this.add
-      .text(GAME_WIDTH / 2, GAME_HEIGHT - 14, 'Click to path · arrows/WASD step · ESC pause', {
-        fontFamily: 'monospace',
-        fontSize: '11px',
-        color: '#5a5848',
-      })
-      .setOrigin(0.5)
-      .setScrollFactor(0)
-      .setDepth(100);
+    this.drawControlsHint();
     this.refreshHud();
+  }
+
+  private drawControlsHint(): void {
+    const y = GAME_HEIGHT - 18;
+    const items: Array<[number, string]> = [
+      [Inputs.mouseLeft, 'path'],
+      [Inputs.arrowUp, 'step'],
+      [Inputs.keyEsc, 'pause'],
+      [Inputs.keyI, 'inv'],
+      [Inputs.keyC, 'char'],
+    ];
+    let cx = 8;
+    for (const [icon, label] of items) {
+      this.add
+        .image(cx, y, ASSET_KEYS.ui.inputs, icon)
+        .setOrigin(0, 0.5)
+        .setScale(2)
+        .setScrollFactor(0)
+        .setDepth(100);
+      cx += 28;
+      const t = this.add
+        .text(cx, y, label, {
+          fontFamily: 'monospace',
+          fontSize: '11px',
+          color: '#e5e3d8',
+          stroke: '#1a1a24',
+          strokeThickness: 3,
+        })
+        .setOrigin(0, 0.5)
+        .setScrollFactor(0)
+        .setDepth(100);
+      cx += t.width + 12;
+    }
   }
 
   private refreshHud(): void {

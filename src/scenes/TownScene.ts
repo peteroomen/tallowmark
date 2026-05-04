@@ -4,22 +4,53 @@ import {
   COLORS,
   GAME_HEIGHT,
   GAME_WIDTH,
+  RENDER_SCALE,
   SCENE_KEYS,
   TILE_SIZE,
-  RENDER_SCALE,
 } from '@/config';
+import { CharsSheet, Inputs, TilesRPG } from '@/world/FrameCatalog';
 import { getServices } from '@/services';
 
+const TOWN_W = Math.floor(GAME_WIDTH / TILE_SIZE);
+const TOWN_H = Math.floor(GAME_HEIGHT / TILE_SIZE);
+
+interface Building {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  label: string;
+  /** Roof color (hex) — drawn as the top half of the building. */
+  roof: number;
+  /** Wall color (hex) — drawn as the bottom half. */
+  wall: number;
+}
+
+const BUILDINGS: Building[] = [
+  { x: 2, y: 2, w: 5, h: 4, label: 'Apothecary', roof: 0x8a3a3a, wall: 0xc9a06b },
+  { x: 9, y: 2, w: 5, h: 4, label: 'Blacksmith', roof: 0x4a5a6a, wall: 0xc9a06b },
+  { x: 16, y: 2, w: 5, h: 4, label: 'Inn', roof: 0x6a4a2f, wall: 0xc9a06b },
+  { x: 2, y: 11, w: 5, h: 3, label: 'Upgrade Shrine', roof: 0x9a7a3a, wall: 0xc9a06b },
+];
+
+const DUNGEON_ENTRANCE = { x: 17, y: 11, w: 4, h: 3 };
+
 /**
- * Tallowmark — the hub town. v1 is a static placeholder map: a grass field with
- * a few buildings rendered as colored blocks, an NPC stub, and a dungeon entrance
- * portal that prompts before descending. The town will grow with metaprogression.
+ * Tallowmark — the hub town.
+ *
+ * Floor uses confirmed Kenney rpg-pack grass tiles. Buildings and the dungeon
+ * entrance are drawn as palette-tinted rectangles for v2 — they read as
+ * "buildings" without relying on yet-to-be-confirmed wall/roof frames.
+ *
+ * Trees use confirmed rpg-pack tree frames. Player uses the confirmed warrior
+ * frame from the chars-pack.
+ *
+ * Iteration target: replace the rectangle buildings with proper Kenney
+ * wall/roof tiles once frames are picked via DebugSheetScene (F9 in dev).
  */
 export class TownScene extends Phaser.Scene {
   private playerSprite!: Phaser.GameObjects.Image;
-  private playerTile = { x: 12, y: 8 };
-  private dungeonEntrance = { x: 18, y: 4 };
-  private cooldown = 0;
+  private playerTile = { x: 11, y: 8 };
 
   constructor() {
     super(SCENE_KEYS.Town);
@@ -29,132 +60,196 @@ export class TownScene extends Phaser.Scene {
     const services = getServices(this);
     services.audio.playMusic('town');
 
-    this.drawGround();
-    this.drawBuildings();
+    this.drawGrass();
+    this.drawPaths();
+    for (const b of BUILDINGS) this.drawBuilding(b);
     this.drawDungeonEntrance();
+    this.drawTrees();
     this.drawPlayer();
     this.drawHud();
 
     this.input.keyboard?.on('keydown-ESC', () => this.scene.start(SCENE_KEYS.MainMenu));
-    // Click anywhere to walk toward (v1: instant teleport for the town hub).
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => this.onClick(p));
-
-    // Arrow / WASD movement
     this.input.keyboard?.on('keydown', (e: KeyboardEvent) => this.onKey(e));
   }
 
-  override update(_time: number, delta: number): void {
-    if (this.cooldown > 0) this.cooldown -= delta;
-  }
+  // ---------- World rendering ----------
 
-  private drawGround(): void {
-    // Solid grass-coloured fill plus a subtle grid for orientation.
-    this.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, 0x2a3d24);
-    const g = this.add.graphics({ lineStyle: { color: 0x1f2e1b, width: 1 } });
-    for (let x = 0; x <= GAME_WIDTH; x += TILE_SIZE) {
-      g.lineBetween(x, 0, x, GAME_HEIGHT);
-    }
-    for (let y = 0; y <= GAME_HEIGHT; y += TILE_SIZE) {
-      g.lineBetween(0, y, GAME_WIDTH, y);
+  private drawGrass(): void {
+    for (let y = 0; y < TOWN_H; y++) {
+      for (let x = 0; x < TOWN_W; x++) {
+        const frame = (x * 31 + y * 17) % 11 === 0 ? TilesRPG.grassAlt : TilesRPG.grass;
+        this.add
+          .image(x * TILE_SIZE + TILE_SIZE / 2, y * TILE_SIZE + TILE_SIZE / 2, ASSET_KEYS.sprites.rpg, frame)
+          .setScale(RENDER_SCALE);
+      }
     }
   }
 
-  private drawBuildings(): void {
-    const buildings: Array<{ x: number; y: number; w: number; h: number; color: number; label: string }> = [
-      { x: 2, y: 2, w: 4, h: 3, color: 0x5a4a3a, label: 'Apothecary\n(coming soon)' },
-      { x: 8, y: 2, w: 4, h: 3, color: 0x5a4a3a, label: 'Blacksmith\n(coming soon)' },
-      { x: 2, y: 11, w: 4, h: 3, color: 0x5a4a3a, label: 'Inn\n(coming soon)' },
-      { x: 14, y: 11, w: 4, h: 3, color: 0x6a5a3a, label: 'Upgrade Shrine\n(coming soon)' },
-    ];
-    for (const b of buildings) {
-      const px = b.x * TILE_SIZE + (b.w * TILE_SIZE) / 2;
-      const py = b.y * TILE_SIZE + (b.h * TILE_SIZE) / 2;
-      this.add
-        .rectangle(px, py, b.w * TILE_SIZE - 4, b.h * TILE_SIZE - 4, b.color)
-        .setStrokeStyle(2, 0x3a2a1f);
-      this.add
-        .text(px, py, b.label, {
-          fontFamily: 'monospace',
-          fontSize: '12px',
-          color: '#e5e3d8',
-          align: 'center',
-        })
-        .setOrigin(0.5);
+  private drawPaths(): void {
+    // Horizontal stone path across the middle, vertical spur to the dungeon.
+    const pathRow = 8;
+    for (let x = 0; x < TOWN_W; x++) {
+      this.placeTile(x, pathRow, TilesRPG.dirt);
     }
+    for (let y = pathRow; y < DUNGEON_ENTRANCE.y; y++) {
+      this.placeTile(DUNGEON_ENTRANCE.x + 1, y, TilesRPG.dirt);
+    }
+  }
+
+  private drawBuilding(b: Building): void {
+    const px = b.x * TILE_SIZE;
+    const py = b.y * TILE_SIZE;
+    const pw = b.w * TILE_SIZE;
+    const ph = b.h * TILE_SIZE;
+
+    // Roof (top 40%)
+    const roofH = Math.floor(ph * 0.4);
+    this.add
+      .rectangle(px + pw / 2, py + roofH / 2, pw - 4, roofH - 2, b.roof)
+      .setStrokeStyle(2, 0x1a1a24);
+
+    // Wall (bottom 60%)
+    this.add
+      .rectangle(px + pw / 2, py + roofH + (ph - roofH) / 2, pw - 4, ph - roofH - 2, b.wall)
+      .setStrokeStyle(2, 0x1a1a24);
+
+    // Door (centered on bottom)
+    const doorH = TILE_SIZE;
+    this.add
+      .rectangle(px + pw / 2, py + ph - doorH / 2 - 4, TILE_SIZE * 0.7, doorH, 0x3a2a1f)
+      .setStrokeStyle(2, 0x1a1a24);
+
+    // Two windows
+    const winY = py + roofH + (ph - roofH) * 0.35;
+    this.add.rectangle(px + pw * 0.25, winY, TILE_SIZE * 0.5, TILE_SIZE * 0.5, 0xa0c8d8).setStrokeStyle(2, 0x1a1a24);
+    this.add.rectangle(px + pw * 0.75, winY, TILE_SIZE * 0.5, TILE_SIZE * 0.5, 0xa0c8d8).setStrokeStyle(2, 0x1a1a24);
+
+    // Label
+    this.add
+      .text(px + pw / 2, py - 6, b.label, {
+        fontFamily: 'monospace',
+        fontSize: '14px',
+        color: '#e5e3d8',
+        stroke: '#1a1a24',
+        strokeThickness: 4,
+        fontStyle: 'bold',
+      })
+      .setOrigin(0.5, 1);
   }
 
   private drawDungeonEntrance(): void {
-    const px = this.dungeonEntrance.x * TILE_SIZE + TILE_SIZE / 2;
-    const py = this.dungeonEntrance.y * TILE_SIZE + TILE_SIZE / 2;
+    const e = DUNGEON_ENTRANCE;
+    const px = e.x * TILE_SIZE;
+    const py = e.y * TILE_SIZE;
+    const pw = e.w * TILE_SIZE;
+    const ph = e.h * TILE_SIZE;
+
+    // Stone arch — dark grey rectangle with darker entrance cavity
+    this.add.rectangle(px + pw / 2, py + ph / 2, pw - 4, ph - 2, 0x4a4a52).setStrokeStyle(3, 0x1a1a24);
+    // Cavity
     this.add
-      .rectangle(px, py, TILE_SIZE * 2, TILE_SIZE * 2, 0x14101a)
-      .setStrokeStyle(2, 0xd4a24c);
+      .rectangle(px + pw / 2, py + ph * 0.6, TILE_SIZE * 1.5, TILE_SIZE * 1.8, 0x14101a)
+      .setStrokeStyle(2, 0x1a1a24);
+
     this.add
-      .text(px, py - 4, 'DUNGEON', {
+      .text(px + pw / 2, py - 6, 'TO THE DEEP ↓', {
         fontFamily: 'monospace',
-        fontSize: '12px',
+        fontSize: '14px',
         color: '#d4a24c',
+        stroke: '#1a1a24',
+        strokeThickness: 4,
+        fontStyle: 'bold',
       })
-      .setOrigin(0.5);
-    this.add
-      .text(px, py + 12, '↓', {
-        fontFamily: 'monospace',
-        fontSize: '20px',
-        color: '#d4a24c',
-      })
-      .setOrigin(0.5);
+      .setOrigin(0.5, 1);
+  }
+
+  private drawTrees(): void {
+    const trees: Array<[number, number, number]> = [
+      [1, 1, TilesRPG.tree],
+      [22, 1, TilesRPG.treeDark],
+      [22, 6, TilesRPG.tree],
+      [1, 13, TilesRPG.treeDark],
+      [0, 11, TilesRPG.tree],
+      [8, 12, TilesRPG.treeDark],
+      [14, 12, TilesRPG.tree],
+    ];
+    for (const [x, y, frame] of trees) {
+      if (this.inTownBounds(x, y)) this.placeTile(x, y, frame);
+    }
   }
 
   private drawPlayer(): void {
-    // The Kenney character sheet is laid out by row; pick a hero-looking frame.
-    // Frame index 0 is the top-left character; we'll use it for v1.
     const px = this.playerTile.x * TILE_SIZE + TILE_SIZE / 2;
     const py = this.playerTile.y * TILE_SIZE + TILE_SIZE / 2;
-    this.playerSprite = this.add.image(px, py, ASSET_KEYS.sprites.chars, 0).setScale(RENDER_SCALE);
+    this.playerSprite = this.add
+      .image(px, py, ASSET_KEYS.sprites.chars, CharsSheet.player)
+      .setScale(RENDER_SCALE)
+      .setDepth(10);
   }
 
   private drawHud(): void {
     const services = getServices(this);
     this.add
-      .text(8, 8, `Tallowmark — Hub Town`, {
+      .text(8, 8, 'TALLOWMARK', {
         fontFamily: 'monospace',
-        fontSize: '14px',
+        fontSize: '16px',
         color: '#d4a24c',
+        fontStyle: 'bold',
+        stroke: '#1a1a24',
+        strokeThickness: 3,
       })
-      .setOrigin(0, 0);
+      .setOrigin(0, 0)
+      .setDepth(100);
     this.add
       .text(8, 28, `Souls: ${services.persistent.metaCurrency}`, {
         fontFamily: 'monospace',
         fontSize: '12px',
-        color: '#9a988e',
+        color: '#e5e3d8',
+        stroke: '#1a1a24',
+        strokeThickness: 3,
       })
-      .setOrigin(0, 0);
-    this.add
-      .text(8, GAME_HEIGHT - 24, 'Click the dungeon entrance to descend · ESC for menu', {
-        fontFamily: 'monospace',
-        fontSize: '12px',
-        color: '#5a5848',
-      })
-      .setOrigin(0, 0);
+      .setOrigin(0, 0)
+      .setDepth(100);
+
+    // Footer with input-prompt sprites.
+    const footerY = GAME_HEIGHT - 18;
+    let fx = 10;
+    const addPrompt = (frame: number, text: string) => {
+      this.add
+        .image(fx, footerY, ASSET_KEYS.ui.inputs, frame)
+        .setOrigin(0, 0.5)
+        .setScale(2)
+        .setDepth(100);
+      fx += 28;
+      const t = this.add
+        .text(fx, footerY, text, {
+          fontFamily: 'monospace',
+          fontSize: '12px',
+          color: '#e5e3d8',
+          stroke: '#1a1a24',
+          strokeThickness: 3,
+        })
+        .setOrigin(0, 0.5)
+        .setDepth(100);
+      fx += t.width + 14;
+    };
+    addPrompt(Inputs.mouseLeft, 'walk');
+    addPrompt(Inputs.keyEsc, 'menu');
     void COLORS;
   }
+
+  // ---------- Input handlers ----------
 
   private onClick(p: Phaser.Input.Pointer): void {
     const tx = Math.floor(p.worldX / TILE_SIZE);
     const ty = Math.floor(p.worldY / TILE_SIZE);
-    // If they clicked on or adjacent to the dungeon entrance 2x2, prompt.
-    const within =
-      tx >= this.dungeonEntrance.x &&
-      tx <= this.dungeonEntrance.x + 1 &&
-      ty >= this.dungeonEntrance.y &&
-      ty <= this.dungeonEntrance.y + 1;
-    if (within) {
+    if (this.isInDungeonArch(tx, ty)) {
       this.promptDescend();
       return;
     }
-    // Otherwise, walk: instant teleport in v1 for simplicity (turn loop is in the dungeon).
-    this.playerTile = { x: tx, y: ty };
-    this.playerSprite.setPosition(tx * TILE_SIZE + TILE_SIZE / 2, ty * TILE_SIZE + TILE_SIZE / 2);
+    if (!this.inTownBounds(tx, ty)) return;
+    this.movePlayerTo(tx, ty);
   }
 
   private onKey(e: KeyboardEvent): void {
@@ -179,10 +274,9 @@ export class TownScene extends Phaser.Scene {
         break;
       case 'Enter':
       case ' ':
-        // If next to the dungeon entrance, prompt.
         if (
-          Math.abs(this.playerTile.x - (this.dungeonEntrance.x + 0.5)) <= 1.5 &&
-          Math.abs(this.playerTile.y - (this.dungeonEntrance.y + 0.5)) <= 1.5
+          Math.abs(this.playerTile.x - (DUNGEON_ENTRANCE.x + DUNGEON_ENTRANCE.w / 2)) <= 2 &&
+          Math.abs(this.playerTile.y - (DUNGEON_ENTRANCE.y + DUNGEON_ENTRANCE.h / 2)) <= 2
         ) {
           this.promptDescend();
         }
@@ -190,15 +284,40 @@ export class TownScene extends Phaser.Scene {
       default:
         return;
     }
-    const nx = this.playerTile.x + dx;
-    const ny = this.playerTile.y + dy;
-    this.playerTile = { x: nx, y: ny };
-    this.playerSprite.setPosition(nx * TILE_SIZE + TILE_SIZE / 2, ny * TILE_SIZE + TILE_SIZE / 2);
+    this.movePlayerTo(this.playerTile.x + dx, this.playerTile.y + dy);
+  }
+
+  private movePlayerTo(x: number, y: number): void {
+    if (!this.inTownBounds(x, y)) return;
+    this.playerTile = { x, y };
+    this.playerSprite.setPosition(x * TILE_SIZE + TILE_SIZE / 2, y * TILE_SIZE + TILE_SIZE / 2);
+  }
+
+  // ---------- Helpers ----------
+
+  private placeTile(x: number, y: number, frame: number): void {
+    if (!this.inTownBounds(x, y)) return;
+    this.add
+      .image(x * TILE_SIZE + TILE_SIZE / 2, y * TILE_SIZE + TILE_SIZE / 2, ASSET_KEYS.sprites.rpg, frame)
+      .setScale(RENDER_SCALE);
+  }
+
+  private inTownBounds(x: number, y: number): boolean {
+    return x >= 0 && y >= 0 && x < TOWN_W && y < TOWN_H;
+  }
+
+  private isInDungeonArch(x: number, y: number): boolean {
+    return (
+      x >= DUNGEON_ENTRANCE.x &&
+      x < DUNGEON_ENTRANCE.x + DUNGEON_ENTRANCE.w &&
+      y >= DUNGEON_ENTRANCE.y &&
+      y < DUNGEON_ENTRANCE.y + DUNGEON_ENTRANCE.h
+    );
   }
 
   private promptDescend(): void {
     this.scene.launch(SCENE_KEYS.ConfirmDialog, {
-      title: 'Descend into the dungeon?',
+      title: 'Descend?',
       body: 'You will lose any items on your person if you die.\nMeta-currency you earn returns with you.',
       confirmText: 'Descend',
       cancelText: 'Stay',

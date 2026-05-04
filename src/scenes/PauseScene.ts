@@ -20,7 +20,7 @@ export class PauseScene extends Phaser.Scene {
     });
 
     let y = GAME_HEIGHT / 2 - 80;
-    const dy = 56;
+    const dy = 70;
 
     new KenneyButton({
       scene: this,

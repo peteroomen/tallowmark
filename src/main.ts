@@ -12,6 +12,7 @@ import { EquipmentScene } from '@/scenes/EquipmentScene';
 import { CharacterScene } from '@/scenes/CharacterScene';
 import { DeathSummaryScene } from '@/scenes/DeathSummaryScene';
 import { ConfirmDialogScene } from '@/scenes/ConfirmDialogScene';
+import { DebugSheetScene, DEBUG_SHEET_SCENE_KEY } from '@/scenes/DebugSheetScene';
 
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
@@ -41,7 +42,23 @@ const config: Phaser.Types.Core.GameConfig = {
     CharacterScene,
     DeathSummaryScene,
     ConfirmDialogScene,
+    DebugSheetScene,
   ],
 };
 
-new Phaser.Game(config).scene.start(SCENE_KEYS.Boot);
+const game = new Phaser.Game(config);
+game.scene.start(SCENE_KEYS.Boot);
+
+// Dev-only: F9 from anywhere opens the sheet inspector.
+if (import.meta.env.DEV) {
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'F9') {
+      e.preventDefault();
+      const active = game.scene.getScenes(true)[0];
+      const returnTo = active?.scene.key ?? SCENE_KEYS.MainMenu;
+      if (returnTo === DEBUG_SHEET_SCENE_KEY) return;
+      game.scene.stop(returnTo);
+      game.scene.start(DEBUG_SHEET_SCENE_KEY, { returnTo });
+    }
+  });
+}

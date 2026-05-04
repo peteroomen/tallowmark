@@ -11,8 +11,13 @@ export interface SliderOptions {
 }
 
 /**
- * Horizontal 0..1 slider. Drag the knob or click anywhere on the track.
- * Hit target on the knob is generous (24×24) for touch use.
+ * Horizontal 0..1 slider styled to match the Kenney UI panels.
+ *
+ * The Kenney UI sheet has slider/track frames available, but the simplest
+ * thing that reads as the same family is a brown-bordered track plus a wood
+ * knob — drawn from the same palette as the panels. This is intentionally
+ * lower-fidelity than the 9-slice panels: we'll upgrade to a real slider
+ * 9-slice in iteration 2 if it bothers us in play.
  */
 export class Slider extends Phaser.GameObjects.Container {
   private readonly track: Phaser.GameObjects.Rectangle;
@@ -27,19 +32,21 @@ export class Slider extends Phaser.GameObjects.Container {
     this.trackWidth = opts.width;
     this.sliderValue = clamp01(opts.value);
 
+    // Track: dark brown with light-brown inset.
     this.track = opts.scene.add
-      .rectangle(0, 0, this.trackWidth, 6, COLORS.panelBorder)
+      .rectangle(0, 0, this.trackWidth, 14, 0x2a1d12)
+      .setStrokeStyle(2, 0x6a4a2f)
       .setOrigin(0, 0.5);
     this.fill = opts.scene.add
-      .rectangle(0, 0, this.trackWidth * this.sliderValue, 6, COLORS.accent)
+      .rectangle(2, 0, (this.trackWidth - 4) * this.sliderValue, 8, COLORS.accent)
       .setOrigin(0, 0.5);
     this.knob = opts.scene.add
-      .rectangle(this.trackWidth * this.sliderValue, 0, 12, 24, COLORS.text)
-      .setStrokeStyle(2, COLORS.panelBorder)
+      .rectangle(this.trackWidth * this.sliderValue, 0, 14, 26, 0xc9a06b)
+      .setStrokeStyle(2, 0x6a4a2f)
       .setOrigin(0.5);
     this.add([this.track, this.fill, this.knob]);
 
-    const hit = new Phaser.Geom.Rectangle(0, -16, this.trackWidth, 32);
+    const hit = new Phaser.Geom.Rectangle(0, -18, this.trackWidth, 36);
     this.setInteractive(hit, Phaser.Geom.Rectangle.Contains);
     this.on('pointerdown', (p: Phaser.Input.Pointer) => {
       this.dragging = true;
@@ -57,7 +64,7 @@ export class Slider extends Phaser.GameObjects.Container {
 
   applyValue(v: number): void {
     this.sliderValue = clamp01(v);
-    this.fill.width = this.trackWidth * this.sliderValue;
+    this.fill.width = (this.trackWidth - 4) * this.sliderValue;
     this.knob.x = this.trackWidth * this.sliderValue;
   }
 
