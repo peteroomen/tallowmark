@@ -264,20 +264,7 @@ export class TownScene extends Phaser.Scene {
       const slice = this.add
         .nineslice(x, y, ASSET_KEYS.ui.large, it.frame, 36, 36, 6, 6, 6, 6)
         .setOrigin(0.5)
-        .setDepth(100)
-        .setInteractive({ useHandCursor: true });
-      slice.on('pointerover', () => slice.setAlpha(0.9));
-      slice.on('pointerout', () => slice.setAlpha(1));
-      slice.on('pointerdown', () => slice.setAlpha(0.78));
-      slice.on('pointerup', () => {
-        slice.setAlpha(1);
-        try {
-          getServices(this).audio.playSfx(ASSET_KEYS.audio.sfxClick);
-        } catch {
-          /* test contexts */
-        }
-        it.onClick();
-      });
+        .setDepth(100);
       this.add
         .text(x, y, it.key, {
           fontFamily: 'monospace',
@@ -287,6 +274,23 @@ export class TownScene extends Phaser.Scene {
         })
         .setOrigin(0.5)
         .setDepth(101);
+      const zone = this.add
+        .zone(x, y, 36, 36)
+        .setOrigin(0.5)
+        .setDepth(102)
+        .setInteractive({ useHandCursor: true });
+      zone.on('pointerover', () => slice.setAlpha(0.9));
+      zone.on('pointerout', () => slice.setAlpha(1));
+      zone.on('pointerdown', () => slice.setAlpha(0.78));
+      zone.on('pointerup', () => {
+        slice.setAlpha(1);
+        try {
+          getServices(this).audio.playSfx(ASSET_KEYS.audio.sfxClick);
+        } catch {
+          /* test contexts */
+        }
+        it.onClick();
+      });
       x -= 42;
     }
   }

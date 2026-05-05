@@ -1,18 +1,17 @@
 import { test, expect, type Page } from '@playwright/test';
 
 /**
- * The user reported that buttons require clicking on specific parts to work.
- * This suite verifies that clicks anywhere within a button's visible area
- * (not just dead center) trigger the click handler.
+ * Verifies that clicks anywhere within a button's *visible bounds* trigger
+ * the click handler — not just one part of the button.
  *
- * Strategy: drive the menu via mouse clicks. For each button area, click at
- * five positions (centre + four corners just inside the visible bounds) and
- * confirm the click registered (the scene transitioned, or the game state
- * changed).
+ * Earlier versions of this spec only checked for absence of console errors,
+ * which silently passed even when only the top-left quadrant of buttons was
+ * clickable (Phaser Container hit-area quirk). This version asserts that
+ * clicks at five positions across the button each cause a *scene transition*,
+ * verified via the dev-only `window.__tallowmark.activeScenes()` hook.
  *
- * Game internal coords are 1152×768 (24×16 tiles × 48px). Phaser's FIT scale
- * mode centres the canvas in the viewport. We compute the screen→game mapping
- * from the canvas bounding box.
+ * Hits the dev server (port 5173) directly so the dev hook is available;
+ * skipped in CI for now (preview build strips dev hooks).
  */
 
 const KNOWN_NOISE = [/Framebuffer status: Framebuffer Unsupported/i, /Unable to decode audio data/i];
@@ -24,12 +23,21 @@ const GAME_W = 1152;
 const GAME_H = 768;
 
 interface Box {
-  /** Game-coordinate centre of the button. */
   cx: number;
   cy: number;
-  /** Game-coordinate width / height of the button's visible area. */
   w: number;
   h: number;
+}
+
+function spreadPoints(b: Box): Array<[number, number, string]> {
+  const pad = 4;
+  return [
+    [b.cx, b.cy, 'centre'],
+    [b.cx - b.w / 2 + pad, b.cy - b.h / 2 + pad, 'top-left'],
+    [b.cx + b.w / 2 - pad, b.cy - b.h / 2 + pad, 'top-right'],
+    [b.cx - b.w / 2 + pad, b.cy + b.h / 2 - pad, 'bottom-left'],
+    [b.cx + b.w / 2 - pad, b.cy + b.h / 2 - pad, 'bottom-right'],
+  ];
 }
 
 async function clickGame(page: Page, gx: number, gy: number): Promise<void> {
@@ -40,89 +48,71 @@ async function clickGame(page: Page, gx: number, gy: number): Promise<void> {
   await page.mouse.click(sx, sy);
 }
 
-/** Click at the four near-corners + centre of a button area, in game coords. */
-function spreadPoints(b: Box): Array<[number, number, string]> {
-  const pad = 4; // stay just inside the edge to avoid 1-px aa fringe
-  return [
-    [b.cx, b.cy, 'centre'],
-    [b.cx - b.w / 2 + pad, b.cy - b.h / 2 + pad, 'top-left'],
-    [b.cx + b.w / 2 - pad, b.cy - b.h / 2 + pad, 'top-right'],
-    [b.cx - b.w / 2 + pad, b.cy + b.h / 2 - pad, 'bottom-left'],
-    [b.cx + b.w / 2 - pad, b.cy + b.h / 2 - pad, 'bottom-right'],
-  ];
+async function activeScenes(page: Page): Promise<string[]> {
+  return page.evaluate(
+    () => (window as { __tallowmark?: { activeScenes?: () => string[] } }).__tallowmark?.activeScenes?.() ?? [],
+  );
 }
 
 test.describe('button responsiveness', () => {
-  test('clicking any part of a Settings button transitions to Settings', async ({ page }) => {
-    // MainMenu button-stack layout: blockTop = (768 - 308) / 2 = 230
-    // First button at blockTop + 120 = 350, dy = 48 → Settings is the 3rd button at y = 350 + 96 = 446
+  test.skip(
+    () => !!process.env.CI,
+    'Requires the dev server (vite); preview build strips the dev hooks. Skipped in CI.',
+  );
+
+  test('Settings button: every corner triggers the Settings scene', async ({ page }) => {
+    // MainMenu layout: blockTop = (768 - 308) / 2 = 230;
+    // first button at blockTop + 120 = 350; dy = 48; Settings is the 3rd (y=446).
     // Buttons are 180×36 (KenneyButton defaults).
     const settingsBtn: Box = { cx: GAME_W / 2, cy: 446, w: 180, h: 36 };
 
     for (const [gx, gy, label] of spreadPoints(settingsBtn)) {
-      const p = await page.context().newPage();
       const errors: string[] = [];
-      p.on('pageerror', (e) => {
+      page.on('pageerror', (e) => {
         if (!isNoise(e.message)) errors.push(e.message);
       });
 
-      await p.goto('/');
-      await p.locator('canvas').waitFor({ state: 'visible' });
-      await p.waitForTimeout(2_000);
+      await page.goto('http://localhost:5173/');
+      await page.locator('canvas').waitFor({ state: 'visible' });
+      await page.waitForTimeout(1_500);
 
-      const box = await p.locator('canvas').boundingBox();
-      if (!box) throw new Error('no canvas');
-      const sx = box.x + (gx / GAME_W) * box.width;
-      const sy = box.y + (gy / GAME_H) * box.height;
-      await p.mouse.click(sx, sy);
-      await p.waitForTimeout(500);
+      // Confirm we're on MainMenu before the click.
+      expect(await activeScenes(page), 'should start on MainMenu').toContain('MainMenu');
 
-      // After clicking Settings, the SETTINGS title should be present in the
-      // canvas. We can't read canvas pixels easily, so we instead screenshot
-      // and verify that the menu's TALLOWMARK title is no longer rendered at
-      // the same place — i.e. the scene changed. Heuristic but enough.
-      // A simpler, more robust check: look at the page errors only.
-      expect(errors, `errors clicking at ${label}: ${errors.join('\n')}`).toEqual([]);
+      await clickGame(page, gx, gy);
+      await page.waitForTimeout(700);
 
-      await p.close();
+      const scenes = await activeScenes(page);
+      expect(scenes, `clicking ${label} of Settings button at (${gx},${gy}) should transition to Settings`).toContain(
+        'Settings',
+      );
+      expect(errors, errors.join('\n')).toEqual([]);
     }
   });
 
-  test('clicking any part of New Game starts a town transition', async ({ page }) => {
-    // First button at y = 350.
+  test('New Game button: every corner triggers Town scene', async ({ page }) => {
     const newGameBtn: Box = { cx: GAME_W / 2, cy: 350, w: 180, h: 36 };
 
     for (const [gx, gy, label] of spreadPoints(newGameBtn)) {
-      const p = await page.context().newPage();
       const errors: string[] = [];
-      p.on('pageerror', (e) => {
+      page.on('pageerror', (e) => {
         if (!isNoise(e.message)) errors.push(e.message);
       });
-      await p.goto('/');
-      await p.locator('canvas').waitFor({ state: 'visible' });
-      await p.waitForTimeout(2_000);
 
-      const box = await p.locator('canvas').boundingBox();
-      if (!box) throw new Error('no canvas');
-      const sx = box.x + (gx / GAME_W) * box.width;
-      const sy = box.y + (gy / GAME_H) * box.height;
-      await p.mouse.click(sx, sy);
-      await p.waitForTimeout(700);
+      await page.goto('http://localhost:5173/');
+      await page.locator('canvas').waitFor({ state: 'visible' });
+      await page.waitForTimeout(1_500);
 
-      expect(errors, `errors clicking at ${label}: ${errors.join('\n')}`).toEqual([]);
-      await p.close();
+      expect(await activeScenes(page), 'should start on MainMenu').toContain('MainMenu');
+
+      await clickGame(page, gx, gy);
+      await page.waitForTimeout(1_500);
+
+      const scenes = await activeScenes(page);
+      expect(scenes, `clicking ${label} of New Game button at (${gx},${gy}) should transition to Town`).toContain(
+        'Town',
+      );
+      expect(errors, errors.join('\n')).toEqual([]);
     }
-  });
-
-  test('canvas is wired up and clickable', async ({ page }) => {
-    // Sanity: a click anywhere on the canvas doesn't blow up.
-    page.on('pageerror', (e) => {
-      if (!isNoise(e.message)) throw e;
-    });
-    await page.goto('/');
-    await page.locator('canvas').waitFor({ state: 'visible' });
-    await page.waitForTimeout(2_000);
-    await clickGame(page, 100, 100);
-    await page.waitForTimeout(400);
   });
 });

@@ -376,26 +376,13 @@ export class DungeonScene extends Phaser.Scene {
       },
     ];
     let x = GAME_WIDTH - 24;
-    const y = 56; // sits below the floor/turn plank
+    const y = 56;
     for (const it of items) {
       const slice = this.add
         .nineslice(x, y, ASSET_KEYS.ui.large, it.frame, 36, 36, 6, 6, 6, 6)
         .setOrigin(0.5)
         .setScrollFactor(0)
-        .setDepth(100)
-        .setInteractive({ useHandCursor: true });
-      slice.on('pointerover', () => slice.setAlpha(0.9));
-      slice.on('pointerout', () => slice.setAlpha(1));
-      slice.on('pointerdown', () => slice.setAlpha(0.78));
-      slice.on('pointerup', () => {
-        slice.setAlpha(1);
-        try {
-          getServices(this).audio.playSfx(ASSET_KEYS.audio.sfxClick);
-        } catch {
-          /* no-op in test envs */
-        }
-        it.onClick();
-      });
+        .setDepth(100);
       this.add
         .text(x, y, it.key, {
           fontFamily: 'monospace',
@@ -406,6 +393,27 @@ export class DungeonScene extends Phaser.Scene {
         .setOrigin(0.5)
         .setScrollFactor(0)
         .setDepth(101);
+      // Hit zone — explicit interactive shape so the entire visual area is
+      // clickable (avoids the Phaser Container hit-area quirk we saw on
+      // KenneyButton).
+      const zone = this.add
+        .zone(x, y, 36, 36)
+        .setOrigin(0.5)
+        .setScrollFactor(0)
+        .setDepth(102)
+        .setInteractive({ useHandCursor: true });
+      zone.on('pointerover', () => slice.setAlpha(0.9));
+      zone.on('pointerout', () => slice.setAlpha(1));
+      zone.on('pointerdown', () => slice.setAlpha(0.78));
+      zone.on('pointerup', () => {
+        slice.setAlpha(1);
+        try {
+          getServices(this).audio.playSfx(ASSET_KEYS.audio.sfxClick);
+        } catch {
+          /* no-op in test envs */
+        }
+        it.onClick();
+      });
       x -= 42;
     }
   }

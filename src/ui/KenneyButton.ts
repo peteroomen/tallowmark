@@ -45,19 +45,24 @@ const TEXT_COLOR_BY_VARIANT: Record<ButtonVariant, string> = {
 const TINT_BY_VARIANT: Record<ButtonVariant, number | undefined> = {
   primary: undefined,
   secondary: undefined,
-  destructive: 0xb84a4a, // muted red overlay on the wood frame
+  destructive: 0xb84a4a,
 };
 
 /**
  * Touch-friendly button rendered using Phaser's built-in 9-slice on a single
- * Kenney UI button frame. Variants set both the frame and the text colour so
- * the call-site doesn't have to spell out colours.
+ * Kenney UI button frame.
  *
- * Hit area is the full panel rectangle, matching the visual bounds.
+ * **Hit testing:** an explicit `Phaser.GameObjects.Zone` child carries the
+ * interactive shape. Earlier we attached `setInteractive(rect, Contains)`
+ * directly to the container, which produced a half-size hit area in the
+ * top-left quadrant of the visible button (a Phaser Container origin /
+ * setSize quirk). Using a Zone makes the hit area exactly match the visible
+ * bounds.
  */
 export class KenneyButton extends Phaser.GameObjects.Container {
   private readonly slice: Phaser.GameObjects.NineSlice;
   private readonly label: Phaser.GameObjects.Text;
+  private readonly hitZone: Phaser.GameObjects.Zone;
   private readonly hitW: number;
   private readonly hitH: number;
   private readonly variant: ButtonVariant;
@@ -96,25 +101,23 @@ export class KenneyButton extends Phaser.GameObjects.Container {
       .setOrigin(0.5);
     this.add(this.label);
 
-    this.setSize(this.hitW, this.hitH);
-    this.setInteractive(
-      new Phaser.Geom.Rectangle(-this.hitW / 2, -this.hitH / 2, this.hitW, this.hitH),
-      Phaser.Geom.Rectangle.Contains,
-    );
+    // Hit zone — invisible, sits on top of the slice + label, captures all
+    // pointer events for the entire button area.
+    this.hitZone = opts.scene.add.zone(0, 0, this.hitW, this.hitH).setOrigin(0.5);
+    this.hitZone.setInteractive({ useHandCursor: true });
+    this.add(this.hitZone);
 
-    this.on('pointerover', () => {
+    this.hitZone.on('pointerover', () => {
       this.slice.setAlpha(0.92);
-      opts.scene.input.setDefaultCursor('pointer');
     });
-    this.on('pointerout', () => {
+    this.hitZone.on('pointerout', () => {
       this.slice.setAlpha(1);
-      opts.scene.input.setDefaultCursor('default');
     });
-    this.on('pointerdown', () => {
+    this.hitZone.on('pointerdown', () => {
       this.slice.setAlpha(0.78);
       this.label.setY(2);
     });
-    this.on('pointerup', () => {
+    this.hitZone.on('pointerup', () => {
       this.slice.setAlpha(1);
       this.label.setY(0);
       try {
@@ -130,5 +133,10 @@ export class KenneyButton extends Phaser.GameObjects.Container {
 
   setLabel(text: string): void {
     this.label.setText(text);
+  }
+
+  override disableInteractive(): this {
+    this.hitZone.disableInteractive();
+    return this;
   }
 }

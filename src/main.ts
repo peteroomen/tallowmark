@@ -61,4 +61,13 @@ if (import.meta.env.DEV) {
       game.scene.start(DEBUG_SHEET_SCENE_KEY, { returnTo });
     }
   });
+
+  // Expose a small inspection API for tests / AI agents.
+  type DebugApi = {
+    activeScenes: () => string[];
+    killPlayer?: () => void;
+  };
+  const w = window as unknown as { __tallowmark?: DebugApi };
+  w.__tallowmark = w.__tallowmark ?? ({} as DebugApi);
+  w.__tallowmark.activeScenes = () => game.scene.getScenes(true).map((s) => s.scene.key);
 }
