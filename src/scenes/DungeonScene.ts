@@ -129,9 +129,12 @@ export class DungeonScene extends Phaser.Scene {
   }
 
   override update(_time: number, delta: number): void {
-    // Death-transition timer. Counted in the scene update loop instead of
-    // Phaser's time.delayedCall so it stays robust against scene transitions
-    // and is observable via state (and thus testable).
+    // Safety net: if the player is dead but no death timer has been started
+    // (rare race seen in QA), kick one off so we always transition to the
+    // DeathSummary scene rather than freezing.
+    if (!this.player.alive && this.deathTimerMs < 0) {
+      this.deathTimerMs = 600;
+    }
     if (this.deathTimerMs >= 0) {
       this.deathTimerMs -= delta;
       if (this.deathTimerMs <= 0) {
@@ -170,8 +173,14 @@ export class DungeonScene extends Phaser.Scene {
   // ---------- World generation & rendering ----------
 
   private spawnEnemies(): void {
-    const candidates = this.dungeon.rooms.slice(1, 9);
+    // Floor-scaled enemy budget: floor 1 = 2-3, scaling up by floor.
+    // Multi-floor descent isn't wired yet; until iter 2's stairs-down
+    // chain ships, runState.floor stays at 1.
+    const budget = Math.min(2 + this.runState.floor, 8);
+    const candidates = this.rng.shuffle(this.dungeon.rooms.slice(1));
+    let placed = 0;
     for (const room of candidates) {
+      if (placed >= budget) break;
       const rx = this.rng.intInclusive(room.x1, room.x2);
       const ry = this.rng.intInclusive(room.y1, room.y2);
       if (this.dungeon.tiles.get(rx, ry) !== TileKind.Floor) continue;
@@ -183,6 +192,7 @@ export class DungeonScene extends Phaser.Scene {
         new RatAi(),
       );
       this.enemies.push(enemy);
+      placed += 1;
     }
   }
 
@@ -283,7 +293,7 @@ export class DungeonScene extends Phaser.Scene {
       originX: 0,
       originY: 0.5,
     });
-    this.hpBar.setScrollFactor(0).setDepth(100);
+    this.hpBar.setScrollFactor(0).setDepth(1000);
 
     this.hpText = this.add
       .text(132, 14, '', {
@@ -294,7 +304,7 @@ export class DungeonScene extends Phaser.Scene {
       })
       .setOrigin(0, 0)
       .setScrollFactor(0)
-      .setDepth(100);
+      .setDepth(1000);
 
     // Floor / turn plank top-right.
     new KenneyPlank({
@@ -316,7 +326,7 @@ export class DungeonScene extends Phaser.Scene {
       })
       .setOrigin(1, 0)
       .setScrollFactor(0)
-      .setDepth(100);
+      .setDepth(1000);
     // Log plank — narrow horizontal slate strip at the bottom-left, behind
     // the message log so it reads against busy tiles.
     new KenneyPlank({
@@ -344,7 +354,7 @@ export class DungeonScene extends Phaser.Scene {
       })
       .setOrigin(0, 1)
       .setScrollFactor(0)
-      .setDepth(100);
+      .setDepth(1000);
 
     this.drawHudIcons();
     this.drawControlsHint();
@@ -382,7 +392,7 @@ export class DungeonScene extends Phaser.Scene {
         .nineslice(x, y, ASSET_KEYS.ui.large, it.frame, 36, 36, 6, 6, 6, 6)
         .setOrigin(0.5)
         .setScrollFactor(0)
-        .setDepth(100);
+        .setDepth(1000);
       this.add
         .text(x, y, it.key, {
           fontFamily: 'monospace',
@@ -392,7 +402,7 @@ export class DungeonScene extends Phaser.Scene {
         })
         .setOrigin(0.5)
         .setScrollFactor(0)
-        .setDepth(101);
+        .setDepth(1001);
       // Hit zone — explicit interactive shape so the entire visual area is
       // clickable (avoids the Phaser Container hit-area quirk we saw on
       // KenneyButton).
@@ -400,7 +410,7 @@ export class DungeonScene extends Phaser.Scene {
         .zone(x, y, 36, 36)
         .setOrigin(0.5)
         .setScrollFactor(0)
-        .setDepth(102)
+        .setDepth(1002)
         .setInteractive({ useHandCursor: true });
       zone.on('pointerover', () => slice.setAlpha(0.9));
       zone.on('pointerout', () => slice.setAlpha(1));
@@ -431,7 +441,7 @@ export class DungeonScene extends Phaser.Scene {
         .setOrigin(0, 0.5)
         .setScale(2)
         .setScrollFactor(0)
-        .setDepth(100);
+        .setDepth(1000);
       cx += 28;
       const t = this.add
         .text(cx, y, label, {
@@ -443,7 +453,7 @@ export class DungeonScene extends Phaser.Scene {
         })
         .setOrigin(0, 0.5)
         .setScrollFactor(0)
-        .setDepth(100);
+        .setDepth(1000);
       cx += t.width + 12;
     }
   }
@@ -557,62 +567,55 @@ export class DungeonScene extends Phaser.Scene {
       this.scene.pause();
       return;
     }
-    if (e.key === 'i') {
+    if (e.key === 'i' || e.code === 'KeyI') {
       this.openOverlay(SCENE_KEYS.Inventory);
       return;
     }
-    if (e.key === 'c') {
+    if (e.key === 'c' || e.code === 'KeyC') {
       this.openOverlay(SCENE_KEYS.Character);
       return;
     }
+
+    // Match against both `e.key` and `e.code`. Some automation tools fire
+    // KeyboardEvent with a non-standard `key` field; `code` is more reliable
+    // for layout-independent matching.
+    const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    const c = e.code;
     let dx = 0;
     let dy = 0;
-    switch (e.key) {
-      case 'ArrowUp':
-      case 'w':
-      case 'k':
-        dy = -1;
-        break;
-      case 'ArrowDown':
-      case 's':
-      case 'j':
-        dy = 1;
-        break;
-      case 'ArrowLeft':
-      case 'a':
-      case 'h':
-        dx = -1;
-        break;
-      case 'ArrowRight':
-      case 'd':
-      case 'l':
-        dx = 1;
-        break;
-      case 'y':
-        dx = -1;
-        dy = -1;
-        break;
-      case 'u':
-        dx = 1;
-        dy = -1;
-        break;
-      case 'b':
-        dx = -1;
-        dy = 1;
-        break;
-      case 'n':
-        dx = 1;
-        dy = 1;
-        break;
-      case '.':
-      case '5':
-      case 'Clear': // numpad 5 on macOS sometimes reports as Clear
-      case 'Decimal':
-        // Wait one turn — same logic as bumping into your own tile.
-        this.tryStep(this.player.pos);
-        return;
-      default:
-        return;
+    if (k === 'arrowup' || k === 'w' || k === 'k' || c === 'ArrowUp' || c === 'KeyW' || c === 'KeyK') {
+      dy = -1;
+    } else if (k === 'arrowdown' || k === 's' || k === 'j' || c === 'ArrowDown' || c === 'KeyS' || c === 'KeyJ') {
+      dy = 1;
+    } else if (k === 'arrowleft' || k === 'a' || k === 'h' || c === 'ArrowLeft' || c === 'KeyA' || c === 'KeyH') {
+      dx = -1;
+    } else if (k === 'arrowright' || k === 'd' || k === 'l' || c === 'ArrowRight' || c === 'KeyD' || c === 'KeyL') {
+      dx = 1;
+    } else if (k === 'y' || c === 'KeyY') {
+      dx = -1;
+      dy = -1;
+    } else if (k === 'u' || c === 'KeyU') {
+      dx = 1;
+      dy = -1;
+    } else if (k === 'b' || c === 'KeyB') {
+      dx = -1;
+      dy = 1;
+    } else if (k === 'n' || c === 'KeyN') {
+      dx = 1;
+      dy = 1;
+    } else if (
+      k === '.' ||
+      k === '5' ||
+      k === 'clear' ||
+      k === 'decimal' ||
+      c === 'Period' ||
+      c === 'Numpad5' ||
+      c === 'NumpadDecimal'
+    ) {
+      this.tryStep(this.player.pos);
+      return;
+    } else {
+      return;
     }
     this.autoPath = [];
     this.destinationMarker.setVisible(false);
@@ -656,7 +659,10 @@ export class DungeonScene extends Phaser.Scene {
   private endRound(playerAction: () => void): void {
     this.turnEngine.submitPlayerAction(() => {
       playerAction();
-      this.runState.turn = this.turnEngine.getTurnNumber() + 1;
+      // Track turn directly on RunState. Don't piggyback on the turnEngine's
+      // internal counter — the engine resets to 0 each scene mount, so a
+      // mid-run Continue would otherwise wipe the turn number.
+      this.runState.turn += 1;
     });
     this.cleanupDeadEnemies();
     this.runState.player = { ...this.player.stats };
@@ -673,6 +679,7 @@ export class DungeonScene extends Phaser.Scene {
     this.log(`You hit the ${enemy.displayName} for ${result.damage}.`);
     if (enemy.stats.hp <= 0) {
       enemy.alive = false;
+      this.runState.kills += 1;
       this.log(`The ${enemy.displayName} dies.`);
     }
   }
@@ -753,7 +760,7 @@ export class DungeonScene extends Phaser.Scene {
     this.scene.start(SCENE_KEYS.DeathSummary, {
       turn: this.runState.turn,
       floor: this.runState.floor,
-      kills: 0,
+      kills: this.runState.kills,
     });
   }
 }

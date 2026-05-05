@@ -98,7 +98,8 @@ export class SaveStore {
     if (!input || typeof input !== 'object') return null;
     const r = input as Partial<RunState>;
     if (r.schemaVersion !== RUN_SCHEMA_VERSION) return null;
-    return r as RunState;
+    // Default newly-added fields so older in-flight saves load cleanly.
+    return { ...r, kills: r.kills ?? 0 } as RunState;
   }
 }
 

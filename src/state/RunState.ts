@@ -22,6 +22,8 @@ export interface RunState {
   seed: number;
   floor: number;
   turn: number;
+  /** Total enemies killed across this run, persisted across save/load. */
+  kills: number;
   playerPos: Point;
   player: PlayerStats;
   /** Set when the run has ended; UIs check this to route to the death summary. */
@@ -34,6 +36,7 @@ export function newRunState(seed: number, startPos: Point): RunState {
     seed,
     floor: 1,
     turn: 0,
+    kills: 0,
     playerPos: { x: startPos.x, y: startPos.y },
     player: { hp: 20, hpMax: 20, power: 4, armor: 1 },
     ended: null,

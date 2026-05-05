@@ -265,7 +265,7 @@ export class TownScene extends Phaser.Scene {
         strokeThickness: 3,
       })
       .setOrigin(0, 0)
-      .setDepth(100);
+      .setDepth(1000);
     this.add
       .text(14, 32, `Embers: ${services.persistent.metaCurrency}`, {
         fontFamily: 'monospace',
@@ -275,7 +275,7 @@ export class TownScene extends Phaser.Scene {
         strokeThickness: 3,
       })
       .setOrigin(0, 0)
-      .setDepth(100);
+      .setDepth(1000);
     this.drawHudIcons();
     this.drawFooter();
     void COLORS;
@@ -292,7 +292,7 @@ export class TownScene extends Phaser.Scene {
       const slice = this.add
         .nineslice(x, y, ASSET_KEYS.ui.large, it.frame, 36, 36, 6, 6, 6, 6)
         .setOrigin(0.5)
-        .setDepth(100);
+        .setDepth(1000);
       this.add
         .text(x, y, it.key, {
           fontFamily: 'monospace',
@@ -301,11 +301,11 @@ export class TownScene extends Phaser.Scene {
           fontStyle: 'bold',
         })
         .setOrigin(0.5)
-        .setDepth(101);
+        .setDepth(1001);
       const zone = this.add
         .zone(x, y, 36, 36)
         .setOrigin(0.5)
-        .setDepth(102)
+        .setDepth(1002)
         .setInteractive({ useHandCursor: true });
       zone.on('pointerover', () => slice.setAlpha(0.9));
       zone.on('pointerout', () => slice.setAlpha(1));
@@ -327,7 +327,7 @@ export class TownScene extends Phaser.Scene {
     const footerY = GAME_HEIGHT - 18;
     let fx = 10;
     const addPrompt = (frame: number, text: string) => {
-      this.add.image(fx, footerY, ASSET_KEYS.ui.inputs, frame).setOrigin(0, 0.5).setScale(2).setDepth(100);
+      this.add.image(fx, footerY, ASSET_KEYS.ui.inputs, frame).setOrigin(0, 0.5).setScale(2).setDepth(1000);
       fx += 28;
       const t = this.add
         .text(fx, footerY, text, {
@@ -338,7 +338,7 @@ export class TownScene extends Phaser.Scene {
           strokeThickness: 3,
         })
         .setOrigin(0, 0.5)
-        .setDepth(100);
+        .setDepth(1000);
       fx += t.width + 14;
     };
     addPrompt(Inputs.mouseLeft, 'walk');
@@ -396,46 +396,37 @@ export class TownScene extends Phaser.Scene {
       this.toggleEditMode();
       return;
     }
-    if (this.editing) {
-      this.handleEditKey(e);
-      return;
-    }
+    // Edit mode owns the keyboard. Don't fall through to gameplay handlers
+    // (movement, overlays, etc.) when the editor is active.
+    if (this.editing) return;
+    const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    const c = e.code;
     let dx = 0;
     let dy = 0;
-    switch (e.key) {
-      case 'ArrowUp':
-      case 'w':
-        dy = -1;
-        break;
-      case 'ArrowDown':
-      case 's':
-        dy = 1;
-        break;
-      case 'ArrowLeft':
-      case 'a':
-        dx = -1;
-        break;
-      case 'ArrowRight':
-      case 'd':
-        dx = 1;
-        break;
-      case 'Enter':
-      case ' ':
-        if (
-          Math.abs(this.playerTile.x - (DUNGEON_ENTRANCE.x + DUNGEON_ENTRANCE.w / 2)) <= 2 &&
-          Math.abs(this.playerTile.y - (DUNGEON_ENTRANCE.y + DUNGEON_ENTRANCE.h / 2)) <= 2
-        ) {
-          this.promptDescend();
-        }
-        return;
-      case 'i':
-        this.openOverlay(SCENE_KEYS.Inventory);
-        return;
-      case 'c':
-        this.openOverlay(SCENE_KEYS.Character);
-        return;
-      default:
-        return;
+    if (k === 'arrowup' || k === 'w' || c === 'ArrowUp' || c === 'KeyW') {
+      dy = -1;
+    } else if (k === 'arrowdown' || k === 's' || c === 'ArrowDown' || c === 'KeyS') {
+      dy = 1;
+    } else if (k === 'arrowleft' || k === 'a' || c === 'ArrowLeft' || c === 'KeyA') {
+      dx = -1;
+    } else if (k === 'arrowright' || k === 'd' || c === 'ArrowRight' || c === 'KeyD') {
+      dx = 1;
+    } else if (k === 'enter' || k === ' ' || c === 'Enter' || c === 'Space') {
+      if (
+        Math.abs(this.playerTile.x - (DUNGEON_ENTRANCE.x + DUNGEON_ENTRANCE.w / 2)) <= 2 &&
+        Math.abs(this.playerTile.y - (DUNGEON_ENTRANCE.y + DUNGEON_ENTRANCE.h / 2)) <= 2
+      ) {
+        this.promptDescend();
+      }
+      return;
+    } else if (k === 'i' || c === 'KeyI') {
+      this.openOverlay(SCENE_KEYS.Inventory);
+      return;
+    } else if (k === 'c' || c === 'KeyC') {
+      this.openOverlay(SCENE_KEYS.Character);
+      return;
+    } else {
+      return;
     }
     this.movePlayerTo(this.playerTile.x + dx, this.playerTile.y + dy);
   }
@@ -473,7 +464,6 @@ export class TownScene extends Phaser.Scene {
     this.painting = false;
     this.currentStrokeCells = [];
 
-    // Hover highlight square.
     this.hoverHighlight = this.add
       .rectangle(0, 0, TILE_SIZE, TILE_SIZE, 0xffffff, 0)
       .setStrokeStyle(2, 0xffd76a, 0.95)
@@ -483,6 +473,18 @@ export class TownScene extends Phaser.Scene {
 
     this.editorUi = this.buildEditorUi();
     this.updateEditStatus('paint');
+
+    // Bind editor keys via Phaser's specific keydown-* events so they don't
+    // collide with the generic onKey handler (which also handles movement
+    // 's', 'a' etc.). preventDefault stops the browser from doing anything
+    // odd with these keys.
+    const kb = this.input.keyboard;
+    if (kb) {
+      kb.on('keydown-Z', this.onEditZ, this);
+      kb.on('keydown-Y', this.onEditRedoKey, this);
+      kb.on('keydown-S', this.onEditSaveKey, this);
+      kb.on('keydown-E', this.onEditExportKey, this);
+    }
   }
 
   private exitEditMode(): void {
@@ -492,6 +494,34 @@ export class TownScene extends Phaser.Scene {
     this.hoverHighlight = undefined;
     this.editorUi?.destroy();
     this.editorUi = undefined;
+
+    const kb = this.input.keyboard;
+    if (kb) {
+      kb.off('keydown-Z', this.onEditZ, this);
+      kb.off('keydown-Y', this.onEditRedoKey, this);
+      kb.off('keydown-S', this.onEditSaveKey, this);
+      kb.off('keydown-E', this.onEditExportKey, this);
+    }
+  }
+
+  private onEditZ(e: KeyboardEvent): void {
+    e.preventDefault();
+    if (e.shiftKey) this.applyRedo();
+    else this.applyUndo();
+  }
+  private onEditRedoKey(e: KeyboardEvent): void {
+    e.preventDefault();
+    this.applyRedo();
+  }
+  private onEditSaveKey(e: KeyboardEvent): void {
+    e.preventDefault();
+    saveMapToLocal(TOWN_MAP_KEY, this.mapData);
+    this.updateEditStatus('saved to localStorage');
+  }
+  private onEditExportKey(e: KeyboardEvent): void {
+    e.preventDefault();
+    downloadMapAsTiledJSON(this.mapData, 'town.json');
+    this.updateEditStatus('exported town.json');
   }
 
   private buildEditorUi(): Phaser.GameObjects.Container {
@@ -638,28 +668,6 @@ export class TownScene extends Phaser.Scene {
     }
     this.currentStrokeCells = [];
     this.updateEditStatus('paint');
-  }
-
-  private handleEditKey(e: KeyboardEvent): void {
-    // Z = undo, Shift+Z = redo (also Y for redo)
-    if ((e.key === 'z' || e.key === 'Z') && !e.shiftKey) {
-      this.applyUndo();
-      return;
-    }
-    if (((e.key === 'z' || e.key === 'Z') && e.shiftKey) || e.key === 'y' || e.key === 'Y') {
-      this.applyRedo();
-      return;
-    }
-    if (e.key === 's' || e.key === 'S') {
-      saveMapToLocal(TOWN_MAP_KEY, this.mapData);
-      this.updateEditStatus('saved to localStorage');
-      return;
-    }
-    if (e.key === 'e' || e.key === 'E') {
-      downloadMapAsTiledJSON(this.mapData, 'town.json');
-      this.updateEditStatus('exported town.json');
-      return;
-    }
   }
 
   private applyUndo(): void {
