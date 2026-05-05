@@ -4,13 +4,21 @@ import { KenneyButton } from '@/ui/KenneyButton';
 import { KenneyPanel } from '@/ui/KenneyPanel';
 import { getServices } from '@/services';
 
+interface CharacterSceneData {
+  returnTo?: string;
+}
+
 export class CharacterScene extends Phaser.Scene {
+  private returnTo: string = SCENE_KEYS.Town;
+
   constructor() {
     super(SCENE_KEYS.Character);
   }
 
-  create(): void {
+  create(data: CharacterSceneData = {}): void {
+    this.returnTo = data.returnTo ?? SCENE_KEYS.Town;
     const services = getServices(this);
+
     this.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, 0x000000, 0.6);
     new KenneyPanel({
       scene: this,
@@ -59,10 +67,15 @@ export class CharacterScene extends Phaser.Scene {
       width: 180,
       text: 'Close',
       primary: true,
-      onClick: () => this.scene.stop(),
+      onClick: () => this.close(),
     });
 
-    this.input.keyboard?.once('keydown-ESC', () => this.scene.stop());
-    this.input.keyboard?.once('keydown-c', () => this.scene.stop());
+    this.input.keyboard?.once('keydown-ESC', () => this.close());
+    this.input.keyboard?.once('keydown-c', () => this.close());
+  }
+
+  private close(): void {
+    this.scene.resume(this.returnTo);
+    this.scene.stop();
   }
 }

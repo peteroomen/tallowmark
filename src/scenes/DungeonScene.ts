@@ -19,6 +19,8 @@ import { RatAi } from '@/entities/ai/RatAi';
 import { generateBspDungeon, type GeneratedDungeon } from '@/world/Dungeon/BspGenerator';
 import { TileKind, TILES } from '@/world/Tile';
 import { CharsSheet, Inputs, UiLarge } from '@/world/FrameCatalog';
+import { KenneyPlank } from '@/ui/KenneyPlank';
+import { HpBar } from '@/ui/HpBar';
 import { findPath, findPathToBump } from '@/core/Pathfinding';
 import { chebyshev, type Point } from '@/core/Grid';
 import { newRunState, type RunState } from '@/state/RunState';
@@ -59,9 +61,12 @@ export class DungeonScene extends Phaser.Scene {
   private floorText!: Phaser.GameObjects.Text;
   private logText!: Phaser.GameObjects.Text;
   private logLines: string[] = [];
+  private hpBar!: HpBar;
 
   private autoPath: Point[] = [];
   private autoStepTimer = 0;
+  /** ms remaining before auto-transitioning to DeathSummary; -1 means inactive. */
+  private deathTimerMs = -1;
 
   constructor() {
     super(SCENE_KEYS.Dungeon);
@@ -101,11 +106,41 @@ export class DungeonScene extends Phaser.Scene {
     this.input.keyboard?.on('keydown', (e: KeyboardEvent) => this.onKey(e));
 
     services.save.saveRun(this.runState);
-    this.log(`You enter the dungeon. Seed: ${this.runState.seed}.`);
+    if (!data.resume) {
+      this.log(`You enter the dungeon. Seed: ${this.runState.seed}.`);
+    } else {
+      this.log(`You resume your descent.`);
+    }
+
+    // Dev hook for tests / AI agents — exposes a way to trigger game events
+    // without needing to drive the BSP-generated layout to a specific state.
+    if (import.meta.env.DEV) {
+      const w = window as unknown as { __tallowmark?: { killPlayer?: () => void } };
+      w.__tallowmark = w.__tallowmark ?? {};
+      w.__tallowmark.killPlayer = () => {
+        this.player.stats.hp = 0;
+        this.player.alive = false;
+        this.runState.player = { ...this.player.stats };
+        this.log('You die.');
+        this.handlePlayerDeath();
+      };
+    }
     void COLORS;
   }
 
   override update(_time: number, delta: number): void {
+    // Death-transition timer. Counted in the scene update loop instead of
+    // Phaser's time.delayedCall so it stays robust against scene transitions
+    // and is observable via state (and thus testable).
+    if (this.deathTimerMs >= 0) {
+      this.deathTimerMs -= delta;
+      if (this.deathTimerMs <= 0) {
+        this.deathTimerMs = -1;
+        this.toDeathSummary();
+        return;
+      }
+    }
+
     if (this.autoPath.length > 0 && this.player.alive) {
       this.autoStepTimer -= delta;
       if (this.autoStepTimer <= 0) {
@@ -225,25 +260,86 @@ export class DungeonScene extends Phaser.Scene {
 
   private drawHud(): void {
     const stroke = { stroke: '#1a1a24', strokeThickness: 3 };
+
+    // Stat plank — backs HP bar + Pow/Arm text on the top-left.
+    new KenneyPlank({
+      scene: this,
+      x: 4,
+      y: 4,
+      width: 320,
+      height: 36,
+      variant: 'wood',
+    })
+      .setScrollFactor(0)
+      .setDepth(99);
+
+    // HP bar (left) + numeric HP/Pow/Arm (right of bar).
+    this.hpBar = new HpBar({
+      scene: this,
+      x: 14,
+      y: 22,
+      width: 110,
+      height: 14,
+      originX: 0,
+      originY: 0.5,
+    });
+    this.hpBar.setScrollFactor(0).setDepth(100);
+
     this.hpText = this.add
-      .text(8, 8, '', { fontFamily: 'monospace', fontSize: '14px', color: '#e5e3d8', ...stroke })
+      .text(132, 14, '', {
+        fontFamily: 'monospace',
+        fontSize: '13px',
+        color: '#e5e3d8',
+        ...stroke,
+      })
       .setOrigin(0, 0)
       .setScrollFactor(0)
       .setDepth(100);
+
+    // Floor / turn plank top-right.
+    new KenneyPlank({
+      scene: this,
+      x: GAME_WIDTH - 184,
+      y: 4,
+      width: 180,
+      height: 28,
+      variant: 'wood',
+    })
+      .setScrollFactor(0)
+      .setDepth(99);
     this.floorText = this.add
-      .text(GAME_WIDTH - 8, 8, '', { fontFamily: 'monospace', fontSize: '14px', color: '#d4a24c', ...stroke })
+      .text(GAME_WIDTH - 14, 11, '', {
+        fontFamily: 'monospace',
+        fontSize: '13px',
+        color: '#d4a24c',
+        ...stroke,
+      })
       .setOrigin(1, 0)
       .setScrollFactor(0)
       .setDepth(100);
+    // Log plank — narrow horizontal slate strip at the bottom-left, behind
+    // the message log so it reads against busy tiles.
+    new KenneyPlank({
+      scene: this,
+      x: 4,
+      y: GAME_HEIGHT - 96,
+      width: 580,
+      height: 64,
+      variant: 'dark',
+      alpha: 0.7,
+    })
+      .setScrollFactor(0)
+      .setDepth(99);
+
     // Log: bottom-left anchored, grows UP so it never collides with the
     // controls hint at GAME_HEIGHT - 18. Word-wrap stays clear of the right-
     // side HUD icons.
     this.logText = this.add
-      .text(8, GAME_HEIGHT - 36, '', {
+      .text(16, GAME_HEIGHT - 38, '', {
         fontFamily: 'monospace',
         fontSize: '12px',
         color: '#e5e3d8',
-        wordWrap: { width: GAME_WIDTH - 200 },
+        wordWrap: { width: 560 },
         ...stroke,
       })
       .setOrigin(0, 1)
@@ -261,13 +357,13 @@ export class DungeonScene extends Phaser.Scene {
         frame: UiLarge.buttonGrey,
         key: 'I',
         tooltip: 'Inventory (i)',
-        onClick: () => this.scene.launch(SCENE_KEYS.Inventory),
+        onClick: () => this.openOverlay(SCENE_KEYS.Inventory),
       },
       {
         frame: UiLarge.buttonGrey,
         key: 'C',
         tooltip: 'Character (c)',
-        onClick: () => this.scene.launch(SCENE_KEYS.Character),
+        onClick: () => this.openOverlay(SCENE_KEYS.Character),
       },
       {
         frame: UiLarge.buttonGrey,
@@ -280,7 +376,7 @@ export class DungeonScene extends Phaser.Scene {
       },
     ];
     let x = GAME_WIDTH - 24;
-    const y = 38;
+    const y = 56; // sits below the floor/turn plank
     for (const it of items) {
       const slice = this.add
         .nineslice(x, y, ASSET_KEYS.ui.large, it.frame, 36, 36, 6, 6, 6, 6)
@@ -346,7 +442,8 @@ export class DungeonScene extends Phaser.Scene {
 
   private refreshHud(): void {
     const stats = this.player.stats;
-    this.hpText.setText(`HP ${stats.hp}/${stats.hpMax}    Pow ${stats.power}    Arm ${stats.armor}`);
+    this.hpBar.setHp(stats.hp, stats.hpMax);
+    this.hpText.setText(`${stats.hp}/${stats.hpMax}   Pow ${stats.power}   Arm ${stats.armor}`);
     this.floorText.setText(`Floor ${this.runState.floor}    Turn ${this.runState.turn}`);
     this.logText.setText(this.logLines.slice(-4).join('\n'));
   }
@@ -355,6 +452,12 @@ export class DungeonScene extends Phaser.Scene {
     this.logLines.push(msg);
     if (this.logLines.length > 50) this.logLines.shift();
     this.refreshHud();
+  }
+
+  /** Pause the dungeon and open the named overlay scene; resumes on close. */
+  private openOverlay(key: string): void {
+    this.scene.launch(key, { returnTo: SCENE_KEYS.Dungeon });
+    this.scene.pause();
   }
 
   // ---------- Animation helpers ----------
@@ -447,11 +550,11 @@ export class DungeonScene extends Phaser.Scene {
       return;
     }
     if (e.key === 'i') {
-      this.scene.launch(SCENE_KEYS.Inventory);
+      this.openOverlay(SCENE_KEYS.Inventory);
       return;
     }
     if (e.key === 'c') {
-      this.scene.launch(SCENE_KEYS.Character);
+      this.openOverlay(SCENE_KEYS.Character);
       return;
     }
     let dx = 0;
@@ -494,6 +597,10 @@ export class DungeonScene extends Phaser.Scene {
         dy = 1;
         break;
       case '.':
+      case '5':
+      case 'Clear': // numpad 5 on macOS sometimes reports as Clear
+      case 'Decimal':
+        // Wait one turn — same logic as bumping into your own tile.
         this.tryStep(this.player.pos);
         return;
       default:
@@ -619,7 +726,8 @@ export class DungeonScene extends Phaser.Scene {
     this.destinationMarker.setVisible(false);
     this.runState.ended = { reason: 'death', turn: this.runState.turn };
     getServices(this).save.saveRun(this.runState);
-    this.time.delayedCall(400, () => this.toDeathSummary());
+    // Counted in update() — see `deathTimerMs`.
+    this.deathTimerMs = 600;
   }
 
   private completeRunSurvived(): void {

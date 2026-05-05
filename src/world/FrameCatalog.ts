@@ -101,12 +101,26 @@ export const CharsSheet = {
  * UI Large sheet — single-tile complete buttons. Use Phaser's `add.nineslice`
  * with one of these as the source frame to make resizable buttons/panels with
  * crisp corners.
+ *
+ * Frame indices verified at 2× scale via DebugSheetScene (F9 → TAB to ui-large).
  */
 export const UiLarge = {
-  buttonCream: uiL(0, 0),
-  buttonBrown: uiL(1, 0),
-  buttonBlue: uiL(2, 0),
-  buttonGrey: uiL(3, 0),
+  // Beveled square buttons — base for nine-slice scaling.
+  buttonCream: uiL(0, 0), // ivory / parchment
+  buttonBrown: uiL(1, 0), // wood (primary)
+  buttonSlate: uiL(2, 0), // light slate-blue
+  buttonGrey: uiL(3, 0), // dark slate (secondary)
+  buttonDark: uiL(8, 0), // near-black with bevel (dark variant base)
+  // Red-outlined cream button — used for destructive actions when a tint
+  // overlay isn't appropriate. Frame 33 in the sheet (col 7, row 2).
+  buttonRedOutlined: uiL(7, 2),
+
+  // Hexagon badges — for floor-number / status pills.
+  hexCream: uiL(0, 5),
+  hexBrown: uiL(1, 5),
+  hexSlate: uiL(2, 5),
+  hexDark: uiL(3, 5),
+  hexRed: uiL(2, 6),
 } as const;
 
 /**

@@ -9,6 +9,7 @@ import {
   TILE_SIZE,
 } from '@/config';
 import { CharsSheet, Inputs, TilesRPG, UiLarge } from '@/world/FrameCatalog';
+import { KenneyPlank } from '@/ui/KenneyPlank';
 import { getServices } from '@/services';
 
 const TOWN_W = Math.floor(GAME_WIDTH / TILE_SIZE);
@@ -96,8 +97,9 @@ export class TownScene extends Phaser.Scene {
   }
 
   private drawLake(): void {
-    // One big body of water — flat blue rectangle with a darker outline so it
-    // reads as a coherent lake instead of dozens of scattered shore-edge tiles.
+    // One body of water — flat blue rectangle with darker outline so it reads
+    // as a coherent pond rather than scattered shore-edge tiles.
+    // Iteration-2 task: replace with proper Kenney water tiles via the painter.
     const px = LAKE.x * TILE_SIZE;
     const py = LAKE.y * TILE_SIZE;
     const pw = LAKE.w * TILE_SIZE;
@@ -105,12 +107,21 @@ export class TownScene extends Phaser.Scene {
     this.add
       .rectangle(px + pw / 2, py + ph / 2, pw - 4, ph - 4, 0x4a8aa8)
       .setStrokeStyle(3, 0x2a5870);
-    // Subtle ripple lines.
     for (let i = 0; i < 4; i++) {
-      const rx = px + 8 + Math.floor(((i * 17) % (pw - 64)));
+      const rx = px + 8 + Math.floor((i * 17) % (pw - 64));
       const ry = py + 12 + i * 28;
       this.add.rectangle(rx, ry, 24, 2, 0x6aa8c8).setOrigin(0, 0.5);
     }
+    this.add
+      .text(px + pw / 2, py - 6, 'Pond', {
+        fontFamily: 'monospace',
+        fontSize: '13px',
+        color: '#cfe7f0',
+        stroke: '#1a1a24',
+        strokeThickness: 4,
+        fontStyle: 'italic',
+      })
+      .setOrigin(0.5, 1);
   }
 
   private drawPaths(): void {
@@ -195,10 +206,22 @@ export class TownScene extends Phaser.Scene {
 
   private drawHud(): void {
     const services = getServices(this);
+
+    // Wood plank backing for nameplate so the title/embers text reads
+    // against any grass / path tile.
+    new KenneyPlank({
+      scene: this,
+      x: 4,
+      y: 4,
+      width: 200,
+      height: 50,
+      variant: 'wood',
+    }).setDepth(99);
+
     this.add
-      .text(8, 8, 'TALLOWMARK', {
+      .text(14, 12, 'TALLOWMARK', {
         fontFamily: 'monospace',
-        fontSize: '16px',
+        fontSize: '14px',
         color: '#d4a24c',
         fontStyle: 'bold',
         stroke: '#1a1a24',
@@ -207,7 +230,7 @@ export class TownScene extends Phaser.Scene {
       .setOrigin(0, 0)
       .setDepth(100);
     this.add
-      .text(8, 28, `Embers: ${services.persistent.metaCurrency}`, {
+      .text(14, 32, `Embers: ${services.persistent.metaCurrency}`, {
         fontFamily: 'monospace',
         fontSize: '12px',
         color: '#e5e3d8',
@@ -227,12 +250,12 @@ export class TownScene extends Phaser.Scene {
       {
         frame: UiLarge.buttonGrey,
         key: 'I',
-        onClick: () => this.scene.launch(SCENE_KEYS.Inventory),
+        onClick: () => this.openOverlay(SCENE_KEYS.Inventory),
       },
       {
         frame: UiLarge.buttonGrey,
         key: 'C',
-        onClick: () => this.scene.launch(SCENE_KEYS.Character),
+        onClick: () => this.openOverlay(SCENE_KEYS.Character),
       },
     ];
     let x = GAME_WIDTH - 24;
@@ -337,10 +360,10 @@ export class TownScene extends Phaser.Scene {
         }
         return;
       case 'i':
-        this.scene.launch(SCENE_KEYS.Inventory);
+        this.openOverlay(SCENE_KEYS.Inventory);
         return;
       case 'c':
-        this.scene.launch(SCENE_KEYS.Character);
+        this.openOverlay(SCENE_KEYS.Character);
         return;
       default:
         return;
@@ -363,6 +386,12 @@ export class TownScene extends Phaser.Scene {
         this.moving = false;
       },
     });
+  }
+
+  /** Pause the town and open the named overlay scene; resumes on close. */
+  private openOverlay(key: string): void {
+    this.scene.launch(key, { returnTo: SCENE_KEYS.Town });
+    this.scene.pause();
   }
 
   // ---------- Helpers ----------

@@ -3,12 +3,21 @@ import { GAME_HEIGHT, GAME_WIDTH, SCENE_KEYS } from '@/config';
 import { KenneyButton } from '@/ui/KenneyButton';
 import { KenneyPanel } from '@/ui/KenneyPanel';
 
+interface InventorySceneData {
+  /** The scene to resume when this overlay closes. Defaults to Town. */
+  returnTo?: string;
+}
+
 export class InventoryScene extends Phaser.Scene {
+  private returnTo: string = SCENE_KEYS.Town;
+
   constructor() {
     super(SCENE_KEYS.Inventory);
   }
 
-  create(): void {
+  create(data: InventorySceneData = {}): void {
+    this.returnTo = data.returnTo ?? SCENE_KEYS.Town;
+
     this.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, 0x000000, 0.6);
     new KenneyPanel({
       scene: this,
@@ -43,10 +52,15 @@ export class InventoryScene extends Phaser.Scene {
       width: 180,
       text: 'Close',
       primary: true,
-      onClick: () => this.scene.stop(),
+      onClick: () => this.close(),
     });
 
-    this.input.keyboard?.once('keydown-ESC', () => this.scene.stop());
-    this.input.keyboard?.once('keydown-i', () => this.scene.stop());
+    this.input.keyboard?.once('keydown-ESC', () => this.close());
+    this.input.keyboard?.once('keydown-i', () => this.close());
+  }
+
+  private close(): void {
+    this.scene.resume(this.returnTo);
+    this.scene.stop();
   }
 }

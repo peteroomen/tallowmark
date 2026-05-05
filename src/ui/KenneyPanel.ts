@@ -2,6 +2,8 @@ import Phaser from 'phaser';
 import { ASSET_KEYS } from '@/config';
 import { UiLarge } from '@/world/FrameCatalog';
 
+export type PanelVariant = 'wood' | 'slate' | 'dark';
+
 export interface KenneyPanelOptions {
   scene: Phaser.Scene;
   x: number;
@@ -10,26 +12,32 @@ export interface KenneyPanelOptions {
   height: number;
   title?: string;
   /**
-   * 'wood'  — brown beveled panel  (frame UiLarge.buttonBrown)
-   * 'light' — cream beveled panel  (frame UiLarge.buttonCream)
-   * 'inset' — grey beveled panel   (frame UiLarge.buttonGrey)
+   * Visual grammar:
+   *   'wood'  — friendly menus (Inventory, Character, Settings, friendly confirms)
+   *   'slate' — neutral / paused / cancel-able (Pause, "Stay" confirm)
+   *   'dark'  — dangerous / final (DeathSummary, destructive confirms)
    */
-  variant?: 'wood' | 'light' | 'inset';
+  variant?: PanelVariant;
 }
 
-const FRAME_BY_VARIANT: Record<NonNullable<KenneyPanelOptions['variant']>, number> = {
+const FRAME_BY_VARIANT: Record<PanelVariant, number> = {
   wood: UiLarge.buttonBrown,
-  light: UiLarge.buttonCream,
-  inset: UiLarge.buttonGrey,
+  slate: UiLarge.buttonGrey,
+  dark: UiLarge.buttonDark,
 };
 
-// Each Kenney UI Large tile is a 32×32 button with a ~6px bevel border.
+const TITLE_COLOR_BY_VARIANT: Record<PanelVariant, string> = {
+  wood: '#3a2a1f',
+  slate: '#e5e3d8',
+  dark: '#d4a24c',
+};
+
 const BORDER = 8;
 
 /**
  * Panel rendered using Phaser's built-in 9-slice scaling on a single Kenney
  * UI button frame. Corners stay crisp; the middle stretches to fill.
- * Origin is centered.
+ * Origin centered.
  */
 export class KenneyPanel extends Phaser.GameObjects.Container {
   constructor(opts: KenneyPanelOptions) {
@@ -58,7 +66,7 @@ export class KenneyPanel extends Phaser.GameObjects.Container {
         .text(0, titleY, opts.title, {
           fontFamily: 'monospace',
           fontSize: '20px',
-          color: variant === 'inset' ? '#e5e3d8' : '#3a2a1f',
+          color: TITLE_COLOR_BY_VARIANT[variant],
           fontStyle: 'bold',
         })
         .setOrigin(0.5);

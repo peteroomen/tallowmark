@@ -17,6 +17,7 @@ export class PauseScene extends Phaser.Scene {
       width: 360,
       height: 240,
       title: 'PAUSED',
+      variant: 'slate',
     });
 
     new KenneyButton({
@@ -33,10 +34,12 @@ export class PauseScene extends Phaser.Scene {
       x: GAME_WIDTH / 2,
       y: GAME_HEIGHT / 2 + 36,
       text: 'Abandon Run',
+      variant: 'destructive',
       onClick: () =>
         this.scene.launch(SCENE_KEYS.ConfirmDialog, {
           title: 'Abandon this run?',
-          body: 'Your dungeon progress will be lost.\nMeta-currency you earned is kept.',
+          body: 'Your dungeon progress will be lost.\nEmbers you earned are kept.',
+          tone: 'destructive',
           confirmText: 'Abandon',
           cancelText: 'Keep going',
           onConfirm: () => {

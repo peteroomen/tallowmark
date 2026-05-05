@@ -51,17 +51,21 @@ export class MainMenuScene extends Phaser.Scene {
     });
     y += dy;
 
+    // Cache the save state once at scene creation. Re-querying inside the
+    // onClick handler led to drift on fresh-load (bug #1 in the QA report).
+    const hasSavedRun = !!services.save.loadRun();
     const continueBtn = new KenneyButton({
       scene: this,
       x: btnX,
       y,
-      text: services.save.loadRun() ? 'Continue' : 'Continue (no save)',
+      text: hasSavedRun ? 'Continue' : 'Continue (no save)',
       onClick: () => {
-        if (services.save.loadRun()) this.continueRun();
+        if (hasSavedRun) this.continueRun();
       },
     });
-    if (!services.save.loadRun()) {
-      continueBtn.setAlpha(0.5);
+    if (!hasSavedRun) {
+      continueBtn.setAlpha(0.45);
+      continueBtn.disableInteractive();
     }
     y += dy;
 

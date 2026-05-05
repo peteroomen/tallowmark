@@ -70,6 +70,7 @@ export class SettingsScene extends Phaser.Scene {
       y: GAME_HEIGHT / 2 + 160,
       width: 180,
       text: 'Reset Save',
+      variant: 'destructive',
       onClick: () => this.confirmReset(),
     });
 
@@ -79,7 +80,7 @@ export class SettingsScene extends Phaser.Scene {
       y: GAME_HEIGHT / 2 + 160,
       width: 180,
       text: 'Back',
-      primary: true,
+      variant: 'primary',
       onClick: () => this.scene.start(SCENE_KEYS.MainMenu),
     });
 
@@ -90,6 +91,7 @@ export class SettingsScene extends Phaser.Scene {
     this.scene.launch(SCENE_KEYS.ConfirmDialog, {
       title: 'Reset all save data?',
       body: 'This wipes meta-currency, unlocks, and any in-progress run.\nThis cannot be undone.',
+      tone: 'destructive',
       confirmText: 'Reset',
       cancelText: 'Keep',
       onConfirm: () => {

@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
-import { COLORS, GAME_HEIGHT, GAME_WIDTH, SCENE_KEYS } from '@/config';
+import { GAME_HEIGHT, GAME_WIDTH, SCENE_KEYS } from '@/config';
 import { KenneyButton } from '@/ui/KenneyButton';
-import { KenneyPanel } from '@/ui/KenneyPanel';
+import { KenneyPanel, type PanelVariant } from '@/ui/KenneyPanel';
 
 export interface ConfirmDialogData {
   title: string;
@@ -10,7 +10,18 @@ export interface ConfirmDialogData {
   cancelText?: string;
   onConfirm: () => void;
   onCancel?: () => void;
+  /**
+   * 'normal' uses the wood panel + amber confirm (default).
+   * 'destructive' uses the slate panel + red confirm — for irreversible
+   * actions like Reset Save and Abandon Run.
+   */
+  tone?: 'normal' | 'destructive';
 }
+
+const PANEL_BY_TONE: Record<NonNullable<ConfirmDialogData['tone']>, PanelVariant> = {
+  normal: 'wood',
+  destructive: 'slate',
+};
 
 export class ConfirmDialogScene extends Phaser.Scene {
   constructor() {
@@ -18,7 +29,8 @@ export class ConfirmDialogScene extends Phaser.Scene {
   }
 
   create(data: ConfirmDialogData): void {
-    // Dim the underlying scene
+    const tone = data.tone ?? 'normal';
+
     this.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, 0x000000, 0.6);
 
     const w = 520;
@@ -30,6 +42,7 @@ export class ConfirmDialogScene extends Phaser.Scene {
       width: w,
       height: h,
       title: data.title,
+      variant: PANEL_BY_TONE[tone],
     });
 
     this.add
@@ -47,6 +60,7 @@ export class ConfirmDialogScene extends Phaser.Scene {
       y: GAME_HEIGHT / 2 + 70,
       width: 180,
       text: data.cancelText ?? 'Cancel',
+      variant: 'secondary',
       onClick: () => {
         data.onCancel?.();
         this.scene.stop();
@@ -59,7 +73,7 @@ export class ConfirmDialogScene extends Phaser.Scene {
       y: GAME_HEIGHT / 2 + 70,
       width: 180,
       text: data.confirmText ?? 'Confirm',
-      primary: true,
+      variant: tone === 'destructive' ? 'destructive' : 'primary',
       onClick: () => {
         data.onConfirm();
         this.scene.stop();
@@ -70,7 +84,5 @@ export class ConfirmDialogScene extends Phaser.Scene {
       data.onCancel?.();
       this.scene.stop();
     });
-
-    void COLORS;
   }
 }

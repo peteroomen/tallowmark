@@ -3,6 +3,8 @@ import { ASSET_KEYS } from '@/config';
 import { UiLarge } from '@/world/FrameCatalog';
 import { getServices } from '@/services';
 
+export type ButtonVariant = 'primary' | 'secondary' | 'destructive';
+
 export interface KenneyButtonOptions {
   scene: Phaser.Scene;
   x: number;
@@ -11,7 +13,16 @@ export interface KenneyButtonOptions {
   height?: number;
   text: string;
   onClick: () => void;
-  /** Primary uses the brown wood frame; otherwise grey. */
+  /**
+   * Visual grammar — applied site-wide:
+   *   'primary'     → amber / wood (confirm, proceed)
+   *   'secondary'   → slate (cancel, back, neutral)
+   *   'destructive' → wood + red tint (Reset Save, Abandon Run)
+   *
+   * Backwards-compat: passing `primary: true` is treated as variant: 'primary'.
+   */
+  variant?: ButtonVariant;
+  /** @deprecated use `variant` */
   primary?: boolean;
 }
 
@@ -19,24 +30,45 @@ const BORDER = 6;
 const DEFAULT_W = 180;
 const DEFAULT_H = 36;
 
+const FRAME_BY_VARIANT: Record<ButtonVariant, number> = {
+  primary: UiLarge.buttonBrown,
+  secondary: UiLarge.buttonGrey,
+  destructive: UiLarge.buttonBrown,
+};
+
+const TEXT_COLOR_BY_VARIANT: Record<ButtonVariant, string> = {
+  primary: '#3a2a1f',
+  secondary: '#e5e3d8',
+  destructive: '#fbe6e6',
+};
+
+const TINT_BY_VARIANT: Record<ButtonVariant, number | undefined> = {
+  primary: undefined,
+  secondary: undefined,
+  destructive: 0xb84a4a, // muted red overlay on the wood frame
+};
+
 /**
  * Touch-friendly button rendered using Phaser's built-in 9-slice on a single
- * Kenney UI button frame. Corners stay crisp; the middle stretches.
+ * Kenney UI button frame. Variants set both the frame and the text colour so
+ * the call-site doesn't have to spell out colours.
  *
- * Hit target is the full panel; minimum 48px tall by default for touch use.
+ * Hit area is the full panel rectangle, matching the visual bounds.
  */
 export class KenneyButton extends Phaser.GameObjects.Container {
   private readonly slice: Phaser.GameObjects.NineSlice;
   private readonly label: Phaser.GameObjects.Text;
   private readonly hitW: number;
   private readonly hitH: number;
+  private readonly variant: ButtonVariant;
 
   constructor(opts: KenneyButtonOptions) {
     super(opts.scene, opts.x, opts.y);
     this.hitW = opts.width ?? DEFAULT_W;
     this.hitH = opts.height ?? DEFAULT_H;
-    const frame = opts.primary ? UiLarge.buttonBrown : UiLarge.buttonGrey;
+    this.variant = opts.variant ?? (opts.primary ? 'primary' : 'secondary');
 
+    const frame = FRAME_BY_VARIANT[this.variant];
     this.slice = opts.scene.add.nineslice(
       0,
       0,
@@ -50,14 +82,16 @@ export class KenneyButton extends Phaser.GameObjects.Container {
       BORDER,
     );
     this.slice.setOrigin(0.5);
+    const tint = TINT_BY_VARIANT[this.variant];
+    if (tint !== undefined) this.slice.setTint(tint);
     this.add(this.slice);
 
     this.label = opts.scene.add
       .text(0, 0, opts.text, {
         fontFamily: 'monospace',
         fontSize: '14px',
-        color: opts.primary ? '#3a2a1f' : '#e5e3d8',
-        fontStyle: opts.primary ? 'bold' : 'normal',
+        color: TEXT_COLOR_BY_VARIANT[this.variant],
+        fontStyle: this.variant !== 'secondary' ? 'bold' : 'normal',
       })
       .setOrigin(0.5);
     this.add(this.label);

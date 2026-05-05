@@ -26,9 +26,8 @@ For each, confirm: scene renders, no console errors, no missing-asset placeholde
 - [ ] **ConfirmDialog** — modal panel above dimmed scene, two buttons
 - [ ] **Dungeon** — BSP-generated rooms+corridors, player sprite, ≥1 goblin, HP/Pow/Arm HUD, log line, prompt footer
 - [ ] **Inventory** — wood panel, "(empty)" body, Close button
-- [ ] **Equipment** — wood panel, five slot rows ("(empty)"), Close button
-- [ ] **Character** — wood panel, stat lines including HP, Souls
-- [ ] **Pause** — wood panel, four buttons (Resume / Inventory / Character / Abandon Run)
+- [ ] **Character** — wood panel, stat lines including HP, Embers
+- [ ] **Pause** — slate panel, two buttons (Resume / Abandon Run). Inventory and Character are reached via the always-visible HUD icons (top-right of Town and Dungeon) or the `i` / `c` hotkeys, not from Pause.
 - [ ] **DeathSummary** — wood panel, stat lines, Souls earned, "Return to Tallowmark" button
 - [ ] **DebugSheetScene (F9)** — labeled spritesheet, TAB cycles views, ESC returns
 
@@ -101,7 +100,8 @@ For each, confirm: scene renders, no console errors, no missing-asset placeholde
 - [ ] **ESC** → Pause overlay appears, dungeon paused beneath
 - [ ] Click **Resume** → unpauses, dungeon active again
 - [ ] **ESC** during pause → resumes (once-listener)
-- [ ] Click **Inventory** from pause → inventory opens
+- [ ] Click the **I** HUD icon (top-right) → inventory opens
+- [ ] Click the **C** HUD icon (top-right) → character sheet opens
 - [ ] Press `i` directly during gameplay → inventory opens
 - [ ] Press `c` directly during gameplay → character sheet opens
 - [ ] Verify enemy AI does **not** advance while inventory/character/pause are open (turn count shouldn't tick)
@@ -193,11 +193,14 @@ Run §1, §4, §5, §6, §8 on each.
 
 ## §15 — Automated suite (must be green before any iteration)
 
+> ⚠️ Run these in a terminal — they cannot be exercised from a browser-only QA pass.
+
 ```bash
+nvm use 20
 npm run lint        # ESLint flat config
 npm run typecheck   # tsc --noEmit
-npm test            # Vitest, 54 unit tests
-npm run test:e2e    # Playwright smoke (boots game, asserts no errors)
+npm test            # Vitest unit tests
+npm run test:e2e    # Playwright (smoke + ui-responsive)
 npm run build       # production build
 ```
 
