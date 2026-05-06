@@ -228,6 +228,26 @@ Found weapons gain 1–3 rune sockets. Runes (already 1 in the iter-2 manifest, 
 
 ---
 
+### Iteration 3.5 — Visible dice rolls (polish stage, ~½ day)
+**Goal:** make seeded RNG *visible* and *honest*. The seeded-RNG ethos already says "the dice are fair" — let the player actually see them land.
+
+**Scope:**
+- 2D Kenney-style sprite dice (d6 + d20). Two atlas sheets, a few frames each. No 3D physics.
+- ≤250 ms tween — bounce in, snap to result, fade out. Animation is purely *decorative* — the roll resolves instantly in the data layer; the dice celebrate the outcome that already happened. No combat logic ever waits on a tween.
+- **Where they appear:** small floating cluster above the actor performing the roll, OR a fixed "dice tray" widget bottom-right. Decide by playtest.
+- **When they appear (default):**
+  - Player bump-attack — d20 roll for hit, d6/d8 for damage.
+  - Search action that *successfully reveals* a trap (failed searches stay silent).
+  - Iter-3+ critical hits / dodges (the moment that benefits most).
+  - Loot chest opens (iter-5).
+- **When they NEVER appear:** auto-path steps, hunger ticks, status DoT ticks, AI sight checks. Anything that fires multiple times per second would turn the dice into noise.
+- **Settings toggle** (cross-cutting): `Show dice rolls: Off / Important moments / All rolls`. Default = Important. Accessibility (motion sensitivity), perf, and preference all served.
+- **Why not earlier:** iter 2 combat is `power - armor` with no roll inflection — there's nothing interesting to *see* land. Once iter 3 brings crits + dodges + weapon trait procs, the visible dice become legibility, not decoration.
+
+> Sequencing: lands after iter 3 ships and before iter 4 unlocks classes. If the iter-3 combat overhaul reveals the timing or visual language is wrong, the dice work is small enough to iterate on or punt entirely.
+
+---
+
 ### Iteration 4 — Classes & magic
 **Goal:** runs feel different from each other. Build variety arrives.
 
