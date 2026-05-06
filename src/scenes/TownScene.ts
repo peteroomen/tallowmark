@@ -525,8 +525,8 @@ export class TownScene extends Phaser.Scene {
     // Edit mode owns the keyboard. Don't fall through to gameplay handlers
     // (movement, overlays, etc.) when the editor is active.
     if (this.editing) return;
-    const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-    const c = e.code;
+    const k = (e.key ?? '').toLowerCase();
+    const c = e.code ?? '';
     let dx = 0;
     let dy = 0;
     if (k === 'arrowup' || k === 'w' || c === 'ArrowUp' || c === 'KeyW') {

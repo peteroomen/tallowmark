@@ -92,6 +92,11 @@ export class DungeonScene extends Phaser.Scene {
   private exploredTiles = new Set<string>();
   private visibleTiles = new Set<string>();
 
+  // Death-transition timer (update-loop backup for the setTimeout in
+  // handlePlayerDeath; whichever fires first wins, guarded by deathTransitionFired).
+  private deathElapsedMs = 0;
+  private deathTransitionFired = false;
+
   constructor() {
     super(SCENE_KEYS.Dungeon);
   }
@@ -102,6 +107,8 @@ export class DungeonScene extends Phaser.Scene {
 
     // Scenes are reused — reset transient state.
     this.deathSequenceStarted = false;
+    this.deathElapsedMs = 0;
+    this.deathTransitionFired = false;
     this.autoPath = [];
     this.autoStepTimer = 0;
     this.enemies = [];
@@ -193,6 +200,20 @@ export class DungeonScene extends Phaser.Scene {
     // off (e.g. a state mutation outside endRound), trigger it now.
     if (!this.player.alive && !this.deathSequenceStarted) {
       this.handlePlayerDeath();
+    }
+
+    // Update-loop backup for the death-transition timer. setTimeout(600)
+    // turned out to be unreliable in some browser environments (QA pass
+    // saw 5+ second delays); the update-loop delta always ticks each frame
+    // regardless of timer throttling, so we count off ~600ms here too and
+    // whichever fires first wins.
+    if (this.deathSequenceStarted && !this.deathTransitionFired) {
+      this.deathElapsedMs += delta;
+      if (this.deathElapsedMs >= 600) {
+        this.deathTransitionFired = true;
+        this.toDeathSummary();
+        return;
+      }
     }
 
     if (this.autoPath.length > 0 && this.player.alive) {
@@ -631,10 +652,11 @@ export class DungeonScene extends Phaser.Scene {
     }
 
     // Match against both `e.key` and `e.code`. Some automation tools fire
-    // KeyboardEvent with a non-standard `key` field; `code` is more reliable
-    // for layout-independent matching.
-    const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-    const c = e.code;
+    // KeyboardEvent with non-standard casing on the `key` field — e.g.
+    // 'Period' instead of 'period', or 'KeyW' instead of 'w'. Lowercase
+    // the whole thing so casing differences don't sink the match.
+    const k = (e.key ?? '').toLowerCase();
+    const c = e.code ?? '';
     let dx = 0;
     let dy = 0;
     if (k === 'arrowup' || k === 'w' || k === 'k' || c === 'ArrowUp' || c === 'KeyW' || c === 'KeyK') {
@@ -884,7 +906,8 @@ export class DungeonScene extends Phaser.Scene {
     // camera's effect queue, or any other ambient state.
     this.cameras.main.fadeOut(500, 0, 0, 0);
     setTimeout(() => {
-      // Guard against double-firing if the scene was already torn down.
+      if (this.deathTransitionFired) return;
+      this.deathTransitionFired = true;
       if (this.scene.isActive() || this.scene.isPaused()) {
         this.toDeathSummary();
       }
