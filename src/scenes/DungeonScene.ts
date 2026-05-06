@@ -23,6 +23,8 @@ import { KenneyPlank } from '@/ui/KenneyPlank';
 import { HpBar } from '@/ui/HpBar';
 import { FogMask, fogKey } from '@/ui/FogMask';
 import { computeFov } from '@/core/Fov';
+import { GameEventBus, type LogTone } from '@/core/Events';
+import { spawnFloatingText } from '@/ui/FloatingText';
 import { findPath, findPathToBump } from '@/core/Pathfinding';
 import { chebyshev, type Point } from '@/core/Grid';
 import { newRunState, type RunState } from '@/state/RunState';
@@ -45,6 +47,19 @@ const AUTO_STEP_INTERVAL_MS = 150; // > STEP_TWEEN_MS so steps don't pile up mid
  * Tuned down from the scaffold value of 999 in stage 4's visual rollout.
  */
 const SIGHT_RADIUS = 8;
+
+/** Log tone → text colour. Drives the colour-coded message log. */
+const LOG_TONE_COLORS: Record<LogTone, string> = {
+  neutral: '#e5e3d8',   // bone — generic action
+  discovery: '#d4a24c', // amber — discovery / item find
+  danger: '#d44a4a',    // red — damage taken / hostile combat
+  recovery: '#6aa84a',  // green — kill / heal / ember reward
+  story: '#4a9ed4',     // cyan — narrative / NPC
+};
+
+/** Floating-text colours, used by combat / status code. */
+const FT_COLOR_DAMAGE = '#d44a4a';
+const FT_COLOR_DEATH = '#ff5050';
 
 /**
  * Helper: world pixel coords of a tile's center.
@@ -78,9 +93,12 @@ export class DungeonScene extends Phaser.Scene {
 
   private hpText!: Phaser.GameObjects.Text;
   private floorText!: Phaser.GameObjects.Text;
-  private logText!: Phaser.GameObjects.Text;
-  private logLines: string[] = [];
+  /** Pre-allocated 4 log slots; index 0 is newest (bottom), 3 is oldest (top). */
+  private logTextSlots: Phaser.GameObjects.Text[] = [];
+  private logLines: Array<{ tone: LogTone; message: string }> = [];
   private hpBar!: HpBar;
+  /** Game event bus — combat / status / item code emits, UI subscribes. */
+  private bus = new GameEventBus();
 
   private autoPath: Point[] = [];
   private autoStepTimer = 0;
@@ -117,6 +135,7 @@ export class DungeonScene extends Phaser.Scene {
     for (const ghost of this.enemyGhostSprites.values()) ghost.destroy();
     this.enemyGhostSprites.clear();
     this.logLines = [];
+    this.bus.clear();
     this.cameras.main.resetFX();
 
     this.runState =
@@ -172,6 +191,26 @@ export class DungeonScene extends Phaser.Scene {
       });
     }
 
+    // Subscribe to the event bus before anything emits. UI translations
+    // live here: 'log' events append a tone-coloured line; 'floatingText'
+    // events spawn an ephemeral bouncer at the tile.
+    this.bus.on((event) => {
+      switch (event.kind) {
+        case 'log':
+          this.logLines.push({ tone: event.tone, message: event.message });
+          if (this.logLines.length > 50) this.logLines.shift();
+          this.refreshLog();
+          break;
+        case 'floatingText':
+          spawnFloatingText(this, event.spec);
+          break;
+        case 'turnAdvanced':
+          // No-op for now; will hang status-effect tick / hunger tick here
+          // in stage 6.
+          break;
+      }
+    });
+
     services.save.saveRun(this.runState);
     if (!data.resume) {
       this.log(`You enter the dungeon. Seed: ${this.runState.seed}.`);
@@ -188,7 +227,11 @@ export class DungeonScene extends Phaser.Scene {
         this.player.stats.hp = 0;
         this.player.alive = false;
         this.runState.player = { ...this.player.stats };
-        this.log('You die.');
+        this.log('You die.', 'danger');
+        this.bus.emit({
+          kind: 'floatingText',
+          spec: { tile: { ...this.player.pos }, text: 'DIED', color: FT_COLOR_DEATH, size: 'large' },
+        });
         this.handlePlayerDeath();
       };
     }
@@ -416,20 +459,28 @@ export class DungeonScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(99);
 
-    // Log: bottom-left anchored, grows UP so it never collides with the
-    // controls hint at GAME_HEIGHT - 18. Word-wrap stays clear of the right-
-    // side HUD icons.
-    this.logText = this.add
-      .text(16, GAME_HEIGHT - 38, '', {
-        fontFamily: 'monospace',
-        fontSize: '12px',
-        color: '#e5e3d8',
-        wordWrap: { width: 560 },
-        ...stroke,
-      })
-      .setOrigin(0, 1)
-      .setScrollFactor(0)
-      .setDepth(1000);
+    // Pre-allocated 4 log slots, each its own Text object so we can colour
+    // lines independently. Slot 0 is the newest line (anchored bottom),
+    // slot 3 is the oldest (top of the log block). Origin (0, 1) means each
+    // line's baseline sits at its anchor y.
+    this.logTextSlots = [];
+    const lineStride = 14;
+    const baseY = GAME_HEIGHT - 38;
+    for (let i = 0; i < 4; i++) {
+      const t = this.add
+        .text(16, baseY - i * lineStride, '', {
+          fontFamily: 'monospace',
+          fontSize: '12px',
+          color: '#e5e3d8',
+          wordWrap: { width: 560 },
+          ...stroke,
+        })
+        .setOrigin(0, 1)
+        .setScrollFactor(0)
+        .setDepth(1000)
+        .setVisible(false);
+      this.logTextSlots.push(t);
+    }
 
     this.drawHudIcons();
     this.drawControlsHint();
@@ -538,13 +589,32 @@ export class DungeonScene extends Phaser.Scene {
     this.hpBar.setHp(stats.hp, stats.hpMax);
     this.hpText.setText(`${stats.hp}/${stats.hpMax}   Pow ${stats.power}   Arm ${stats.armor}`);
     this.floorText.setText(`Floor ${this.runState.floor}    Turn ${this.runState.turn}`);
-    this.logText.setText(this.logLines.slice(-4).join('\n'));
   }
 
-  private log(msg: string): void {
-    this.logLines.push(msg);
-    if (this.logLines.length > 50) this.logLines.shift();
-    this.refreshHud();
+  /**
+   * Fill the 4 log slots with the most recent lines, each in its tone colour.
+   * Slot 0 = newest (bottom), slot 3 = oldest (top).
+   */
+  private refreshLog(): void {
+    const recent = this.logLines.slice(-4);
+    for (let i = 0; i < 4; i++) {
+      const slot = this.logTextSlots[i];
+      if (!slot) continue;
+      // Reverse-index so slot 0 holds recent[N-1] (newest).
+      const line = recent[recent.length - 1 - i];
+      if (line) {
+        slot.setText(line.message);
+        slot.setColor(LOG_TONE_COLORS[line.tone]);
+        slot.setVisible(true);
+      } else {
+        slot.setVisible(false);
+      }
+    }
+  }
+
+  /** Sugar — emits a `log` event onto the bus. */
+  private log(message: string, tone: LogTone = 'neutral'): void {
+    this.bus.emit({ kind: 'log', tone, message });
   }
 
   /** Pause the dungeon and open the named overlay scene; resumes on close. */
@@ -723,7 +793,7 @@ export class DungeonScene extends Phaser.Scene {
 
     const tile = this.dungeon.tiles.get(target.x, target.y);
     if (tile === TileKind.StairsDown) {
-      this.log('You climb back up to Tallowmark with what you found.');
+      this.log('You climb back up to Tallowmark with what you found.', 'recovery');
       this.player.pos = { ...target };
       this.runState.playerPos = { ...target };
       this.tweenTo(this.playerSprite, target);
@@ -829,11 +899,15 @@ export class DungeonScene extends Phaser.Scene {
   private playerAttack(enemy: Enemy): void {
     this.lungeAt(this.playerSprite, enemy.pos);
     const result = this.combat.applyDamage(enemy.stats, this.combat.resolveAttack(this.player.stats, enemy.stats));
-    this.log(`You hit the ${enemy.displayName} for ${result.damage}.`);
+    this.log(`You hit the ${enemy.displayName} for ${result.damage}.`, 'neutral');
+    this.bus.emit({
+      kind: 'floatingText',
+      spec: { tile: { ...enemy.pos }, text: `-${result.damage}`, color: FT_COLOR_DAMAGE },
+    });
     if (enemy.stats.hp <= 0) {
       enemy.alive = false;
       this.runState.kills += 1;
-      this.log(`The ${enemy.displayName} dies.`);
+      this.log(`The ${enemy.displayName} dies.`, 'recovery');
     }
   }
 
@@ -850,10 +924,18 @@ export class DungeonScene extends Phaser.Scene {
           this.player.stats,
           this.combat.resolveAttack(attacker.stats, this.player.stats),
         );
-        this.log(`The ${attacker.displayName} hits you for ${result.damage}.`);
+        this.log(`The ${attacker.displayName} hits you for ${result.damage}.`, 'danger');
+        this.bus.emit({
+          kind: 'floatingText',
+          spec: { tile: { ...this.player.pos }, text: `-${result.damage}`, color: FT_COLOR_DAMAGE },
+        });
         if (this.player.stats.hp <= 0) {
           this.player.alive = false;
-          this.log(`You die.`);
+          this.log('You die.', 'danger');
+          this.bus.emit({
+            kind: 'floatingText',
+            spec: { tile: { ...this.player.pos }, text: 'DIED', color: FT_COLOR_DEATH, size: 'large' },
+          });
         }
       },
       moveEnemy: (enemy, to) => {
