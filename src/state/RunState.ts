@@ -9,6 +9,7 @@
 import type { Point } from '@/core/Grid';
 import type { Identifications } from '@/items/Identification';
 import type { StatusId } from './StatusCatalog';
+import type { TrapKind } from '@/world/Dungeon/TrapCatalog';
 
 export const RUN_SCHEMA_VERSION = 2;
 
@@ -17,6 +18,21 @@ export interface PlayerStats {
   hpMax: number;
   power: number; // base attack power
   armor: number;
+  /**
+   * Chance per turn (0..1) to spot an unrevealed trap on an adjacent tile.
+   * Default 0.30. Boosted to ~0.80 for the turn after a Search action.
+   * Optional so spreading `Player.stats` (which uses the looser CombatStats
+   * shape) is type-compat with PlayerStats; readers default `undefined` → 0.30.
+   */
+  perception?: number;
+}
+
+/** Plain-data trap on the dungeon floor. JSON-serialisable for save/load. */
+export interface TrapState {
+  pos: Point;
+  kind: TrapKind;
+  /** True once the player has spotted it (perception roll or first step). */
+  revealed: boolean;
 }
 
 /** Plain-data inventory entry — runtime `Inventory` class is rehydrated from these on load. */
@@ -61,6 +77,8 @@ export interface RunState {
   identifications: Identifications;
   /** Active statuses on the player (Fortitude, Poisoned, …). */
   activeStatuses: ActiveStatus[];
+  /** Hidden traps on the current floor; regenerated when descending. */
+  traps: TrapState[];
   /** Set when the run has ended; UIs check this to route to the death summary. */
   ended: { reason: 'death' | 'victory'; turn: number } | null;
 }
@@ -80,12 +98,13 @@ export function newRunState(
     playerPos: { x: startPos.x, y: startPos.y },
     // HP/power bumps are deferred to stage 11 (Wayfarer class). Keep iter-2
     // baseline so manual playtest balance is unchanged this stage.
-    player: { hp: 20, hpMax: 20, power: 4, armor: 1 },
+    player: { hp: 20, hpMax: 20, power: 4, armor: 1, perception: 0.3 },
     food: 200,
     foodMax: 200,
     inventory: [{ defId: 'food_hardtack', count: 1 }],
     identifications,
     activeStatuses: [],
+    traps: [],
     ended: null,
   };
 }

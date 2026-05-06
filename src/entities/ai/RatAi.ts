@@ -13,7 +13,9 @@ export class RatAi implements EnemyAi {
     if (!self.alive) return false;
 
     const dist = chebyshev(self.pos, ctx.playerPos);
-    if (dist > SIGHT_RADIUS) return false;
+    // Alarmed enemies ignore sight: an alarm trap broadcasted the player's
+    // position so they chase regardless. Decrements per world tick.
+    if (dist > SIGHT_RADIUS && self.alarmedTurns <= 0) return false;
 
     if (dist === 1) {
       ctx.attackPlayer(self);

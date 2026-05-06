@@ -33,6 +33,11 @@ import { getServices } from '@/services';
 import { buildIdentifications, displayName } from '@/items/Identification';
 import { getItemDef } from '@/items/ItemCatalog';
 import { placeItems, type ItemPlacement } from '@/world/Dungeon/ItemPlacement';
+import { placeTraps } from '@/world/Dungeon/TrapPlacement';
+import { isAdjacent, rollPerception, triggerTrap } from '@/world/Dungeon/Traps';
+import { TRAP_CATALOG } from '@/world/Dungeon/TrapCatalog';
+import { applyStatusTo } from '@/state/StatusBag';
+import type { TrapState } from '@/state/RunState';
 import {
   STARVATION_THRESHOLD,
   statusArmorBonus,
@@ -41,7 +46,7 @@ import {
   type TickEvent,
 } from '@/state/PlayerTick';
 import { hasStatus, tickStatusList } from '@/state/StatusBag';
-import { STATUS_CATALOG, type StatusTarget } from '@/state/StatusCatalog';
+import { STATUS_CATALOG, type StatusId, type StatusTarget } from '@/state/StatusCatalog';
 
 interface DungeonSceneData {
   fresh?: boolean;
@@ -118,6 +123,12 @@ export class DungeonScene extends Phaser.Scene {
   /** Item entities on the floor — `pos` mirrors data, sprite mirrors render. */
   private items: Array<ItemPlacement & { sprite?: Phaser.GameObjects.Image }> = [];
 
+  /** Trap sprites keyed by "x,y". Only revealed traps have a sprite. */
+  private trapSprites = new Map<string, Phaser.GameObjects.Image>();
+
+  /** One-shot perception boost flag — set by Search, consumed on next perception roll. */
+  private searchBoost = false;
+
   /** Window-level keydown handler (QA workaround for physical '.' key). */
   private windowKeyHandler?: (e: KeyboardEvent) => void;
   /** Game event bus — combat / status / item code emits, UI subscribes. */
@@ -166,6 +177,9 @@ export class DungeonScene extends Phaser.Scene {
     this.cameras.main.resetFX();
 
     this.items = [];
+    for (const s of this.trapSprites.values()) s.destroy();
+    this.trapSprites.clear();
+    this.searchBoost = false;
     if (data.resume && services.save.loadRun()) {
       this.runState = services.save.loadRun()!;
     } else {
@@ -187,8 +201,10 @@ export class DungeonScene extends Phaser.Scene {
 
     this.spawnEnemies();
     this.spawnItems();
+    this.spawnTraps();
     this.drawTiles();
     this.drawItems();
+    this.drawTraps();
     this.drawHoverAndMarker();
     this.drawActors();
     this.drawHud();
@@ -856,6 +872,16 @@ export class DungeonScene extends Phaser.Scene {
       this.openOverlay(SCENE_KEYS.Character);
       return;
     }
+    if (e.key === 'q' || e.key === 'Q' || e.code === 'KeyQ') {
+      // Search: enhanced wait. Boosts the next perception roll to ~0.8 and
+      // advances the turn so adjacent unrevealed traps get a high-chance
+      // reveal. Touch-friendly equivalent (long-press the wait button) lands
+      // alongside the touch input layer in iter 6.
+      this.searchBoost = true;
+      this.log('You search the area.', 'discovery');
+      this.tryStep(this.player.pos);
+      return;
+    }
 
     // Match against both `e.key` and `e.code`. Some automation tools fire
     // KeyboardEvent with non-standard casing on the `key` field — e.g.
@@ -949,6 +975,7 @@ export class DungeonScene extends Phaser.Scene {
       this.runState.playerPos = { ...target };
       this.tweenTo(this.playerSprite, target);
       this.tryPickup();
+      this.handleTrapStep();
     });
   }
 
@@ -1110,6 +1137,170 @@ export class DungeonScene extends Phaser.Scene {
     for (const p of placements) this.items.push({ ...p });
   }
 
+  private spawnTraps(): void {
+    // Build occupied list from enemies + items + player so traps don't overlap.
+    const occupied: Point[] = [
+      ...this.enemies.map((e) => ({ x: e.pos.x, y: e.pos.y })),
+      ...this.items.map((i) => ({ x: i.pos.x, y: i.pos.y })),
+      { ...this.player.pos },
+    ];
+    // Resume picks up traps from saved RunState; otherwise generate fresh.
+    if (this.runState.traps && this.runState.traps.length > 0) return;
+    this.runState.traps = placeTraps(this.dungeon, this.rng, {
+      floor: this.runState.floor,
+      occupied,
+    });
+  }
+
+  private drawTraps(): void {
+    for (const t of this.runState.traps) {
+      if (t.revealed) this.placeTrapSprite(t);
+    }
+  }
+
+  /** Render (or refresh) a single trap sprite at its tile. */
+  private placeTrapSprite(trap: TrapState): void {
+    const key = `${trap.pos.x},${trap.pos.y}`;
+    const def = TRAP_CATALOG[trap.kind];
+    if (!def) return;
+    const old = this.trapSprites.get(key);
+    if (old) old.destroy();
+    const w = tileToWorld(trap.pos.x, trap.pos.y);
+    const sprite = this.add
+      .image(w.x, w.y, ASSET_KEYS.sprites.rpg, def.iconFrame)
+      .setScale(RENDER_SCALE)
+      .setOrigin(0.5)
+      .setDepth(6) // below items (7) and actors (9-10), above floor tiles
+      .setTint(parseInt(def.color.slice(1), 16));
+    this.trapSprites.set(key, sprite);
+  }
+
+  private removeTrapSprite(pos: Point): void {
+    const key = `${pos.x},${pos.y}`;
+    const s = this.trapSprites.get(key);
+    if (s) {
+      s.destroy();
+      this.trapSprites.delete(key);
+    }
+  }
+
+  /** Player walked onto a trap tile — fire it. */
+  private handleTrapStep(): void {
+    const idx = this.runState.traps.findIndex(
+      (t) => t.pos.x === this.player.pos.x && t.pos.y === this.player.pos.y,
+    );
+    if (idx < 0) return;
+    const trap = this.runState.traps[idx]!;
+    const def = TRAP_CATALOG[trap.kind];
+    if (!def) return;
+
+    const result = triggerTrap(trap, this.rng);
+    this.log(def.triggeredLine, 'danger');
+
+    if (result.damage > 0) {
+      const dealt = Math.min(result.damage, this.player.stats.hp);
+      this.player.stats.hp -= dealt;
+      this.runState.player.hp = this.player.stats.hp;
+      this.bus.emit({
+        kind: 'floatingText',
+        spec: { tile: { ...this.player.pos }, text: `-${dealt}`, color: FT_COLOR_DAMAGE },
+      });
+    }
+    if (result.applyStatusToTrigger) {
+      applyStatusTo(
+        this.runState.activeStatuses,
+        result.applyStatusToTrigger.id,
+        result.applyStatusToTrigger.turns,
+      );
+    }
+    if (result.aoeTiles && result.applyStatusToAoe) {
+      this.applyAoeStatus(result.aoeTiles, result.applyStatusToAoe.id, result.applyStatusToAoe.turns);
+    }
+    if (result.alarmRadius) {
+      this.broadcastAlarm(trap.pos, result.alarmRadius);
+    }
+
+    if (result.consumed) {
+      this.runState.traps.splice(idx, 1);
+      this.removeTrapSprite(trap.pos);
+    }
+    if (this.player.stats.hp <= 0) this.player.alive = false;
+  }
+
+  /** Apply an AoE status (e.g. gas → poisoned) to every entity standing in the tiles. */
+  private applyAoeStatus(tiles: Point[], statusId: StatusId, turns: number): void {
+    // Brief green tint flash on each tile as a visual marker. ~600 ms.
+    for (const t of tiles) {
+      if (!this.dungeon.tiles.inBounds(t.x, t.y)) continue;
+      const w = tileToWorld(t.x, t.y);
+      const overlay = this.add
+        .rectangle(w.x, w.y, TILE_SIZE, TILE_SIZE, 0x7ac74c, 0.45)
+        .setOrigin(0.5)
+        .setDepth(8);
+      this.tweens.add({
+        targets: overlay,
+        alpha: 0,
+        duration: 600,
+        onComplete: () => overlay.destroy(),
+      });
+    }
+    // Player in cloud?
+    for (const t of tiles) {
+      if (t.x === this.player.pos.x && t.y === this.player.pos.y) {
+        applyStatusTo(this.runState.activeStatuses, statusId, turns);
+        break;
+      }
+    }
+    // Enemies in cloud get poisoned too.
+    for (const enemy of this.enemies) {
+      if (!enemy.alive) continue;
+      if (tiles.some((t) => t.x === enemy.pos.x && t.y === enemy.pos.y)) {
+        applyStatusTo(enemy.statuses, statusId, turns);
+      }
+    }
+  }
+
+  /** Alarm trap: every enemy within `radius` chases regardless of sight. */
+  private broadcastAlarm(pos: Point, radius: number): void {
+    let alerted = 0;
+    for (const e of this.enemies) {
+      if (!e.alive) continue;
+      if (chebyshev(e.pos, pos) <= radius) {
+        e.alarmedTurns = Math.max(e.alarmedTurns, 12);
+        alerted++;
+        this.bus.emit({
+          kind: 'floatingText',
+          spec: { tile: { ...e.pos }, text: '!', color: '#d4a24c', size: 'large' },
+        });
+      }
+    }
+    if (alerted > 0) this.log(`${alerted} enemies are alerted!`, 'danger');
+  }
+
+  /** Roll perception against unrevealed adjacent traps; reveal hits. */
+  private rollPerceptionForAdjacentTraps(): void {
+    const baseP = this.player.stats.perception ?? 0.3;
+    const p = this.searchBoost ? Math.max(baseP, 0.8) : baseP;
+    this.searchBoost = false;
+
+    for (const trap of this.runState.traps) {
+      if (trap.revealed) continue;
+      if (!isAdjacent(this.player.pos, trap.pos)) continue;
+      if (rollPerception(p, this.rng)) {
+        trap.revealed = true;
+        const def = TRAP_CATALOG[trap.kind];
+        if (def) {
+          this.log(def.spottedLine, 'discovery');
+          this.bus.emit({
+            kind: 'floatingText',
+            spec: { tile: { ...trap.pos }, text: '!Spotted!', color: def.color, size: 'small' },
+          });
+        }
+        this.placeTrapSprite(trap);
+      }
+    }
+  }
+
   private drawItems(): void {
     for (const item of this.items) {
       const def = getItemDef(item.defId);
@@ -1181,6 +1372,15 @@ export class DungeonScene extends Phaser.Scene {
     }
 
     this.runEnemyStatusTicks();
+    this.tickAlarm();
+    this.rollPerceptionForAdjacentTraps();
+  }
+
+  /** Decrement each enemy's force-aggro counter once per world tick. */
+  private tickAlarm(): void {
+    for (const e of this.enemies) {
+      if (e.alarmedTurns > 0) e.alarmedTurns -= 1;
+    }
   }
 
   /** Tick each living enemy's status bag. Mirrors player tick behaviour. */

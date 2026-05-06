@@ -27,6 +27,7 @@ export class PauseScene extends Phaser.Scene {
       'WASD / arrows / hjkl  — move',
       'yubn                  — diagonals',
       '.  / numpad 5         — wait one turn',
+      'q                     — search (find traps)',
       'click tile             — auto-path',
       'click enemy            — bump-attack',
       'I  — inventory     C  — character',

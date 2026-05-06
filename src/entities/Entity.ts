@@ -5,6 +5,12 @@ export interface CombatStats {
   hpMax: number;
   power: number;
   armor: number;
+  /**
+   * Chance per turn (0..1) to spot an unrevealed trap on an adjacent tile.
+   * Player default 0.30; enemies default 0 (traps don't fire on enemies),
+   * so this is optional — readers should treat `undefined` as 0.
+   */
+  perception?: number;
 }
 
 let nextId = 1;

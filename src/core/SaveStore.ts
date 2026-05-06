@@ -132,6 +132,27 @@ export class SaveStore {
             (s) => !!s && typeof s.id === 'string' && typeof s.turnsRemaining === 'number',
           )
         : [],
+      traps: Array.isArray(r.traps)
+        ? r.traps.filter(
+            (t) =>
+              !!t &&
+              t.pos &&
+              typeof t.pos.x === 'number' &&
+              typeof t.pos.y === 'number' &&
+              typeof t.kind === 'string' &&
+              typeof t.revealed === 'boolean',
+          )
+        : [],
+      player: r.player
+        ? {
+            hp: typeof r.player.hp === 'number' ? r.player.hp : 20,
+            hpMax: typeof r.player.hpMax === 'number' ? r.player.hpMax : 20,
+            power: typeof r.player.power === 'number' ? r.player.power : 4,
+            armor: typeof r.player.armor === 'number' ? r.player.armor : 1,
+            perception:
+              typeof r.player.perception === 'number' ? r.player.perception : 0.3,
+          }
+        : { hp: 20, hpMax: 20, power: 4, armor: 1, perception: 0.3 },
     } as RunState;
   }
 }

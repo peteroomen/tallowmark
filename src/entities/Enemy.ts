@@ -24,6 +24,13 @@ export class Enemy extends Entity {
    */
   public statuses: ActiveStatus[] = [];
 
+  /**
+   * Force-aggro counter: while > 0, AI chases the player regardless of
+   * sight radius or LoS. Decremented per world tick in DungeonScene. Set
+   * by the alarm trap (and future stage-9 ranged-tag mechanics).
+   */
+  public alarmedTurns = 0;
+
   constructor(
     pos: Point,
     stats: CombatStats,
