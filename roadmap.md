@@ -51,16 +51,94 @@ Each iteration ends with a **playable build**. We don't merge half-finished syst
 
 ---
 
-### Iteration 2 — Roguelike depth
-**Goal:** the dungeon starts to feel like a *roguelike*, not a tile demo.
+### Iteration 2 — The Tactical Foundation
 
-- **Fog of war / FOV** (rot.js precise shadowcasting). Memory of explored-but-unseen tiles.
-- **Hunger clock** ticks each turn; starvation deals damage; food items.
-- **Item identification** — per-run shuffled labels for potions and scrolls. Initial library: 3 potions, 3 scrolls.
-- **Traps** — hidden tiles, Perception stat, status effects on trigger.
-- **Status effects framework** — poison, paralysis, regen, etc.
-- **A second enemy archetype** (e.g. Skeleton Archer) to make line-of-sight matter.
-- **Stairs down** working — multi-floor descent, increasing difficulty curve.
+**Goal:** transition from "tech demo" to "playable pressure cooker." Introduce the **Message & Feedback Loop** (narrative connective tissue) and the **Core Item Manifest** (tactical connective tissue) so disconnected systems read as a coherent game.
+
+**Theme:** environmental + status-based depth, not combat-math depth (no crits/dodges in iter 2 — those live in iter 3's combat overhaul).
+
+**Stage 1-4 — Shipped.** Bug-fix triage + UI grammar foundations + paint mode + Tiled JSON + town visuals + fog of war + ghost markers + edge feather. See git log for details.
+
+**Stage 5 — The Feedback Engine** (½ day)
+The narrative connective tissue. Builds the **Event Bus** that every following stage hangs off.
+- `core/Events.ts` — typed discriminated-union event bus (`damageDealt`, `enemyDied`, `itemPickedUp`, `statusApplied`, `trapTriggered`, etc.). Pure data, no Phaser deps.
+- **Log stream** (persistent): existing 4-line log, gets colour-coded — White (action), Yellow (discovery), Red (danger), Green (recovery), Cyan (story).
+- **Floating-text stream** (ephemeral): "bouncer" numbers and short phrases at world tile coords. Damage red, healing green, "!Spotted!" yellow over traps. Z-depth above the FogMask (depth 70+) so they're never lost in shadow.
+- Combat / item / status code stops calling `this.log()` directly; emits events. UI subscribers translate events to log lines + floating text.
+
+**Stage 6 — Item Manifest + Inventory + Hunger** (1.5 days)
+The tactical connective tissue. Combines item placement, the player's inventory, and the hunger clock — all of which depend on each other.
+- **Item placement in dungeon gen**: floor-aware spawn rates; auto-pickup on walk-onto.
+- **Player ↔ Inventory wiring**: `Player.inventory: Inventory` initialized in `newRunState`, persisted on save.
+- **Hunger system**: `food`/`foodMax` on `RunState`; world-tick subscriber decrements per turn; <40 food triggers starvation (-1 HP every 5 turns); HungerBar widget alongside HpBar.
+- **The 8-item starting manifest:**
+
+  | Type | Name | Effect | Identification |
+  |---|---|---|---|
+  | Potion | Healing | +25% HP | Colour label ("Red Potion") |
+  | Potion | Fortitude | +2 Armor for 20 turns | Colour label |
+  | Potion | Poison | Apply Poisoned (5 turns) | Colour label |
+  | Scroll | Mapping | Reveal walls + traps on floor | Title gibberish ("Scroll of KIR") |
+  | Scroll | Blinking | Teleport to a random visible tile | Title gibberish |
+  | Scroll | Identification | Identify one item in your bag | Title gibberish |
+  | Food | Hardtack | +80 food | Always identified |
+  | Rune | Ember Rune | +10–20 Embers (meta-currency) | Always identified |
+
+- **Action verbs**: Use (drink/read/eat/equip), Drop, Pickup (auto on walk).
+- **Identify scroll workflow**: opens Inventory in "select target" mode — click an unidentified slot to identify that item type for the rest of the run. (No world-space reticle; sub-menu only.)
+
+**Stage 7 — Status Effects + Item Identification** (1 day)
+- `StatusEffect` interface: `id`, `duration`, `tickEffect`, `onApply`, `onRemove`. Per-entity `Map<id, StatusEffect>` on player and enemies.
+- v1 effects: **Healing** (regen 1 HP/turn), **Fortitude** (+armor), **Poisoned** (1 HP/turn), **Confused** (movement direction mirrored), **Bleed** (1 HP/turn, lower-stack than Poison).
+- HUD: 16×16 status icon row next to HP bar with countdowns. Green Cross / Shield / Skull / Swirly / Drop sprites picked from rpg-pack via F9 inspector.
+- **Stack rule:** refresh-with-extension. Two Strength potions = the longer remaining duration, not stacked magnitude.
+- **Identification labels:** per-run shuffled via seeded RNG. Drinking a Cloudy Potion that turns out to be Healing identifies *Cloudy Potion = Healing* for the rest of the run. Wipes on next run.
+
+> **Deferred to iter 3:** terrain-status interactions (e.g. water halves Poison, creates Tainted tile). Dungeons currently have no varied terrain; the interaction has nothing to fire on. Lands when iter-3 adds water/lava/etc to dungeons.
+
+**Stage 8 — Hidden Traps** (½ day)
+Traps are *status delivery vehicles*, not raw damage.
+- `TrapState` parallel to tile data (a `Map<tileKey, TrapState>` on the dungeon). Cleaner than introducing a TrapKind tile because it lets traps coexist with floor tiles.
+- Trap kinds:
+  - **Spike Trap** — 5–8 damage + Bleed (1 HP/turn for 3 turns)
+  - **Gas Trap** — releases a 3×3 Poison Gas cloud (each affected tile applies Poisoned to entities standing on it)
+  - **Alarm Trap** — 0 damage; broadcasts player position to all enemies in 10-tile radius (sets their AI state to CHASE)
+- Player `perception: number` (default ~30%). Each turn, for each unrevealed trap within 1 tile, roll perception; on success, mark revealed and emit `trapSpotted` event (yellow log line + "!Spotted!" floating text).
+- **Wait button** in the HUD doubles as **Search** — magnifying-glass icon, single-tap waits, double-tap or long-press searches (boosts perception roll for that turn). Touch-first compliant.
+- BSP gen: place 1 trap per ~3 rooms on floor tiles only.
+
+**Stage 9 — Skeleton Archer** (½ day)
+Second enemy archetype — teaches the player to use line-of-sight tactically.
+- `ArcherAi`: maintains 3–5 tile distance from player; if player in straight LoS within 5 tiles, fires; if player adjacent, tries to retreat.
+- **Projectile:** tween a small arrow sprite along Bresenham line over ~120ms, then resolve damage. (Gemini asked tween-vs-ray; tween wins for the visual moment.)
+- Stats: 3 HP, 3 power, 0 armor — glass cannon. Spawns from floor 2+.
+- Player ranged attacks **don't** land in iter 2. Skeleton archer is the only thing with range; teaches the kiting → cover loop.
+
+**Stage 10 — Multi-Floor Descent** (½ day)
+- Stairs-down increments `runState.floor`, regenerates the dungeon with `seed + floor`, **keeps** player state (HP, inventory, statuses, embers), **clears** `exploredTiles` (each floor is its own map).
+- Per-floor scaling: `enemy.hp = 5 + floor`, `enemy.power = 2 + Math.floor(floor / 3)`, enemy count `min(2 + floor, 8)` (already in place).
+- Stairs-up only on floor 1 — climbing exits to town with banked Embers. Deeper floors are descent-only.
+- Embers reward scales with deepest floor reached.
+- **Bosses deferred** to iter 3+. Floor 10 just shows a "you've reached the deepest known level" wrap screen for now.
+
+**Stage 11 — The Wayfarer** (½ day)
+Default starting class. Not a true class system — that's iter 4. This is naming + stats + starting kit so the character sheet shows a coherent identity.
+- Class: **Wayfarer** (replaces "Wanderer (placeholder)" in CharacterScene)
+- Stats: HP 30 (was 20), Power 5 (was 4), Armor 1 (unchanged), foodMax 200, perception 30%
+- Starting kit: 1× Hardtack + 1× random unidentified potion in the inventory at run start
+- "Class blueprint" architecture: `entities/classes/Wayfarer.ts` defines stats + starting kit as data; future classes (iter 4: Brigand, Acolyte, Ironclad) slot into the same shape.
+
+**Stage 12 — Iter 2 manual test pass + commit**
+Run the full test plan against stages 5-11. Fix P0/P1s. Document iter-2 closeout.
+
+---
+
+**Cross-cutting infra to ship before / during the above:**
+- Z-depth hierarchy: tiles 0 / actors 9-10 / hover-marker 60 / fog 50 / floating text 70 / ghost markers 8 / HUD 1000+
+- Action-verb model: extend onKey to `u` (use), `d` (drop), `s` (search/wait toggle)
+- Character stat aggregation: `Player.effectiveStats()` = base + equipped item bonuses (Equipment class already exists; just needs to be wired)
+
+**Iter 2 estimate (refined):** ~6–7 working days for stages 5-11, plus ½ day Stage 12 closeout.
 
 ---
 
@@ -88,15 +166,47 @@ Each shop has 3–5 levels. Upgrades change what spawns in the dungeon, what you
 #### Death summary expanded
 Currency-by-source breakdown; "what's new" callouts; pending unlocks.
 
+#### What the shops actually sell
+
+Founders aren't just metaprogression flavour — each shop unlocks a new content **category** that the dungeon then starts seeding. The shop is the gate; the dungeon is the playground.
+
+**Apothecary — the Expanded Manifest**
+
+Iter 2 ships 3 potions (Healing, Fortitude, Poison) + 3 scrolls (Mapping, Blinking, Identification). The Apothecary's shop levels gate *additional* potion / scroll variety into the world drop pool:
+
+- Level 1: **Invisibility** (drop aggro for N turns) and **Recharging** (refill wand charges, future-proofing for iter-4 magic).
+- Level 2: **Rage** (+damage, -armor), **Frost** (slows enemy movement), **Summoning** (friendly distraction NPC for 10 turns).
+- Level 3: **Fear** (enemies flee), **Returning Rune** (instant exit to town), **Shielding Rune** (temporary HP shield).
+
+Each unlock activates *passive* drops in the dungeon, not just a shop SKU.
+
+**Blacksmith — Trait-Based Equipment ("the Armory")**
+
+Iter 2 keeps weapons / armor as flat ±X modifiers. The Blacksmith's arrival shifts the model from "+X stick" to **trait weapons + dodge/reduction armor**:
+
+- **Weapon traits** (the trait *is* the play pattern, not a stat):
+  - **Shortsword** — standard 1-tile bump (default behaviour)
+  - **Spear** — strikes 2 tiles away in a straight line; can't hit diagonals
+  - **Great-axe** — hits 3 frontal tiles in an arc, but has a 1-turn wind-up the player commits to (telegraphed)
+- **Armor traits**:
+  - **Leather** — 15% chance to negate a hit entirely (dodge)
+  - **Plate** — high damage reduction, but increases hunger drain by 20% (encumbrance)
+
+Combat math grows from "subtract" into "what's my pattern" — sets up iter-4 class differentiation (Brigand prefers leather, Ironclad prefers plate).
+
+**Runemaster — Rune Sockets**
+
+Found weapons gain 1–3 rune sockets. Runes (already 1 in the iter-2 manifest, expanded by Apothecary level 3) slot into sockets to grant on-hit / passive effects: Fire Rune adds Burn DoT; Frost Rune slows; Soul Rune grants Embers per kill. Sockets are forged by the Runemaster once rescued.
+
 ---
 
 ### Iteration 4 — Classes & magic
 **Goal:** runs feel different from each other. Build variety arrives.
 
-- **Class blueprint system.** `BasePlayer` → `Warrior`, `Mage`, `Rogue` subclasses (component-based; classes are *data + a few overrides*).
-  - Warrior: melee starter kit, higher HP, lower mana.
-  - Mage: starts with a wand, lower HP, charge-based casting.
-  - Rogue: stealth, daggers, traps.
+- **Class blueprint system.** Iter 2's Wayfarer is the default; iter-4 unlocks three branching builds. Each is *data + a few overrides* on the same `Player` shape:
+  - **Brigand** — high crit on full-HP enemies; starts with 2× Blinking Scroll. Plays around alpha strikes and disengages. Pairs with Leather armor.
+  - **Acolyte** — cooldown-based "Mending" heal; higher perception (traps revealed sooner). Light combat, supports party / herself with status uptime.
+  - **Ironclad** — starts with the Fortitude status active; cannot wear Leather. Plays around tanking through encounters. Pairs with Plate armor.
 - **Charges system instead of mana.** A wand has *N* charges, regenerates 1 every *M* turns. Forces tactical conservation.
 - **Spell library v1.** 4–6 spells across schools (Fire, Frost, Arcane, Shadow). Each is a data definition: range, AoE shape, damage formula, status effect.
 - **Class unlocks via Feats.** Examples: "Reach floor 5 without a melee weapon" → unlock Mage. "Kill 100 enemies with daggers" → unlock Rogue.
