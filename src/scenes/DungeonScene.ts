@@ -39,13 +39,12 @@ const STEP_TWEEN_MS = 130;
 const AUTO_STEP_INTERVAL_MS = 150; // > STEP_TWEEN_MS so steps don't pile up mid-animation
 
 /**
- * Sight radius for fog-of-war shadowcasting. Stage 4 SCAFFOLD value: 999 —
- * effectively unlimited, so every tile is in the visible set and the FogMask
- * draws nothing. The data flow (compute FoV → update exploredTiles → save →
- * update mask) is fully wired; flipping this to 8 or so in the next stage
- * turns the visual fog on without any other code changes.
+ * Sight radius for fog-of-war shadowcasting. Classic-roguelike default of 8
+ * tiles — feels right for the BSP corridor scale (rooms are 4-9 tiles wide,
+ * so 8 sees across most rooms but only into one or two adjacent ones).
+ * Tuned down from the scaffold value of 999 in stage 4's visual rollout.
  */
-const SIGHT_RADIUS = 999;
+const SIGHT_RADIUS = 8;
 
 /**
  * Helper: world pixel coords of a tile's center.
@@ -79,9 +78,10 @@ export class DungeonScene extends Phaser.Scene {
   /** True once the death sequence has been started; used to avoid double-firing. */
   private deathSequenceStarted = false;
 
-  // Fog of war (Stage 4 scaffold)
+  // Fog of war
   private fogMask?: FogMask;
   private exploredTiles = new Set<string>();
+  private visibleTiles = new Set<string>();
 
   constructor() {
     super(SCENE_KEYS.Dungeon);
@@ -273,18 +273,21 @@ export class DungeonScene extends Phaser.Scene {
   }
 
   private drawHoverAndMarker(): void {
+    // Depth 60 — above the FogMask at depth 50, below HUD at 1000+. Lets
+    // the cursor highlight remain visible over fogged tiles so the player
+    // can still see where they're aiming.
     this.hoverHighlight = this.add
       .rectangle(0, 0, TILE_SIZE, TILE_SIZE, 0xffffff, 0)
       .setStrokeStyle(2, 0xffd76a, 0.85)
       .setOrigin(0.5)
-      .setDepth(8)
+      .setDepth(60)
       .setVisible(false);
 
     this.destinationMarker = this.add
       .rectangle(0, 0, TILE_SIZE - 4, TILE_SIZE - 4, 0xd4a24c, 0.18)
       .setStrokeStyle(2, 0xd4a24c, 1)
       .setOrigin(0.5)
-      .setDepth(8)
+      .setDepth(60)
       .setVisible(false);
   }
 
@@ -721,17 +724,29 @@ export class DungeonScene extends Phaser.Scene {
     }
   }
 
-  /** Compute current FoV from the player's position and update the FogMask. */
+  /**
+   * Compute current FoV from the player's position, update the FogMask,
+   * and gate enemy sprite visibility — enemies outside the player's FoV
+   * are hidden so they can't be tracked through walls.
+   */
   private recomputeFov(): void {
     const isOpaque = (x: number, y: number): boolean => {
       if (!this.dungeon.tiles.inBounds(x, y)) return true;
       return TILES[this.dungeon.tiles.get(x, y)].opaque;
     };
-    const visible = computeFov(this.player.pos, SIGHT_RADIUS, isOpaque);
-    // Merge into explored.
-    for (const key of visible) this.exploredTiles.add(key);
-    if (this.fogMask) this.fogMask.update(visible, this.exploredTiles);
-    void fogKey; // imported for future use; suppress unused-import
+    this.visibleTiles = computeFov(this.player.pos, SIGHT_RADIUS, isOpaque);
+    for (const key of this.visibleTiles) this.exploredTiles.add(key);
+    if (this.fogMask) this.fogMask.update(this.visibleTiles, this.exploredTiles);
+
+    // Hide enemy sprites that aren't in the player's FoV. Enemies still
+    // act every turn (classic roguelike behaviour); we just don't render
+    // them through walls.
+    for (const enemy of this.enemies) {
+      const sprite = this.enemySprites.get(enemy.id);
+      if (!sprite) continue;
+      const visible = this.visibleTiles.has(fogKey(enemy.pos.x, enemy.pos.y));
+      sprite.setVisible(visible);
+    }
   }
 
   private playerAttack(enemy: Enemy): void {
