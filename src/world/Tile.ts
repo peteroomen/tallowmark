@@ -19,7 +19,7 @@ export interface TileDef {
 export const TILES: Record<TileKind, TileDef> = {
   [TileKind.Wall]: { kind: TileKind.Wall, walkable: false, opaque: true, iconFrame: TilesRPG.stoneWall },
   [TileKind.Floor]: { kind: TileKind.Floor, walkable: true, opaque: false, iconFrame: TilesRPG.stoneFloor },
-  [TileKind.Door]: { kind: TileKind.Door, walkable: true, opaque: false, iconFrame: TilesRPG.doorClosed },
+  [TileKind.Door]: { kind: TileKind.Door, walkable: true, opaque: false, iconFrame: TilesRPG.doorWood },
   [TileKind.StairsDown]: {
     kind: TileKind.StairsDown,
     walkable: true,

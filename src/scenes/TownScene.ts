@@ -94,6 +94,7 @@ export class TownScene extends Phaser.Scene {
     this.drawLake();
     for (const b of BUILDINGS) this.drawBuilding(b);
     this.drawDungeonEntrance();
+    this.drawDecorations();
     this.drawPlayer();
     this.drawHud();
 
@@ -166,18 +167,35 @@ export class TownScene extends Phaser.Scene {
   // ---------- Procedural overlays (lake, buildings, dungeon arch) ----------
 
   private drawLake(): void {
-    const px = LAKE.x * TILE_SIZE;
-    const py = LAKE.y * TILE_SIZE;
-    const pw = LAKE.w * TILE_SIZE;
-    const ph = LAKE.h * TILE_SIZE;
-    this.add.rectangle(px + pw / 2, py + ph / 2, pw - 4, ph - 4, 0x4a8aa8).setStrokeStyle(3, 0x2a5870);
-    for (let i = 0; i < 4; i++) {
-      const rx = px + 8 + Math.floor((i * 17) % (pw - 64));
-      const ry = py + 12 + i * 28;
-      this.add.rectangle(rx, ry, 24, 2, 0x6aa8c8).setOrigin(0, 0.5);
+    // Draw the lake from the rpg-pack water 9-slice atlas. Each cell of the
+    // LAKE rectangle picks the appropriate corner / edge / center frame.
+    const w = LAKE.w;
+    const h = LAKE.h;
+    for (let yy = 0; yy < h; yy++) {
+      for (let xx = 0; xx < w; xx++) {
+        const isLeft = xx === 0;
+        const isRight = xx === w - 1;
+        const isTop = yy === 0;
+        const isBottom = yy === h - 1;
+        let frame: number;
+        if (isTop && isLeft) frame = TilesRPG.waterTL;
+        else if (isTop && isRight) frame = TilesRPG.waterTR;
+        else if (isBottom && isLeft) frame = TilesRPG.waterBL;
+        else if (isBottom && isRight) frame = TilesRPG.waterBR;
+        else if (isTop) frame = TilesRPG.waterT;
+        else if (isBottom) frame = TilesRPG.waterB;
+        else if (isLeft) frame = TilesRPG.waterL;
+        else if (isRight) frame = TilesRPG.waterR;
+        else frame = TilesRPG.waterC;
+        const cx = (LAKE.x + xx) * TILE_SIZE + TILE_SIZE / 2;
+        const cy = (LAKE.y + yy) * TILE_SIZE + TILE_SIZE / 2;
+        this.add.image(cx, cy, ASSET_KEYS.sprites.rpg, frame).setScale(RENDER_SCALE);
+      }
     }
+    // Subtle italic label above the pond — it's small enough to read as one
+    // body of water but the label still helps it land as intentional.
     this.add
-      .text(px + pw / 2, py - 6, 'Pond', {
+      .text((LAKE.x + LAKE.w / 2) * TILE_SIZE, LAKE.y * TILE_SIZE - 6, 'Pond', {
         fontFamily: 'monospace',
         fontSize: '13px',
         color: '#cfe7f0',
@@ -227,10 +245,17 @@ export class TownScene extends Phaser.Scene {
     const py = e.y * TILE_SIZE;
     const pw = e.w * TILE_SIZE;
     const ph = e.h * TILE_SIZE;
-    this.add.rectangle(px + pw / 2, py + ph / 2, pw - 4, ph - 2, 0x4a4a52).setStrokeStyle(3, 0x1a1a24);
+
+    // Dark stone backing so the arch tile reads as the centerpiece.
+    this.add.rectangle(px + pw / 2, py + ph / 2, pw - 4, ph - 2, 0x32323a).setStrokeStyle(3, 0x1a1a24);
+
+    // Carved stone arch tile (frame 624) — placed at the center of the lower
+    // portion, scaled up so it dominates.
     this.add
-      .rectangle(px + pw / 2, py + ph * 0.6, TILE_SIZE * 1.5, TILE_SIZE * 1.8, 0x14101a)
-      .setStrokeStyle(2, 0x1a1a24);
+      .image(px + pw / 2, py + ph * 0.62, ASSET_KEYS.sprites.rpg, TilesRPG.dungeonStoneArch)
+      .setScale(RENDER_SCALE * 1.4)
+      .setOrigin(0.5);
+
     this.add
       .text(px + pw / 2, py - 6, 'TO THE DEEP ↓', {
         fontFamily: 'monospace',
@@ -241,6 +266,61 @@ export class TownScene extends Phaser.Scene {
         fontStyle: 'bold',
       })
       .setOrigin(0.5, 1);
+  }
+
+  private drawDecorations(): void {
+    // Trees, bushes, fences, rocks. Placed in the gaps between buildings so
+    // they don't overlap structures or the path. Picked from the confirmed
+    // rpg-pack frames in TilesRPG.
+    type Decor = { x: number; y: number; frame: number };
+    const decor: Decor[] = [
+      // Trees in the corners and gaps
+      { x: 0, y: 0, frame: TilesRPG.treePineDark },
+      { x: 23, y: 0, frame: TilesRPG.treePine },
+      { x: 0, y: 5, frame: TilesRPG.treeRound },
+      { x: 22, y: 5, frame: TilesRPG.treeAutumn },
+      { x: 7, y: 1, frame: TilesRPG.treePine },
+      { x: 7, y: 5, frame: TilesRPG.treeRound },
+      { x: 14, y: 5, frame: TilesRPG.treePineDark },
+      { x: 22, y: 6, frame: TilesRPG.treePine },
+      { x: 0, y: 14, frame: TilesRPG.treePineDark },
+      { x: 1, y: 15, frame: TilesRPG.treePine },
+      { x: 7, y: 11, frame: TilesRPG.treeRound },
+      { x: 22, y: 14, frame: TilesRPG.treeAutumn },
+      { x: 23, y: 15, frame: TilesRPG.treePineDark },
+
+      // Bushes (smaller decorative)
+      { x: 1, y: 6, frame: TilesRPG.bushGreen },
+      { x: 22, y: 1, frame: TilesRPG.bushGreen },
+      { x: 14, y: 6, frame: TilesRPG.bushDarkGreen },
+      { x: 7, y: 6, frame: TilesRPG.bushSmall },
+      { x: 16, y: 14, frame: TilesRPG.bushGreen },
+      { x: 4, y: 14, frame: TilesRPG.bushOrange },
+      { x: 21, y: 14, frame: TilesRPG.bushSmall },
+
+      // Rocks
+      { x: 6, y: 14, frame: TilesRPG.rockSmall },
+      { x: 15, y: 13, frame: TilesRPG.rockSmall },
+      { x: 1, y: 9, frame: TilesRPG.rockSmall },
+
+      // Fence row in front of the Apothecary (row y=6)
+      { x: 2, y: 6, frame: TilesRPG.fenceH },
+      { x: 3, y: 6, frame: TilesRPG.fenceHMid },
+      { x: 4, y: 6, frame: TilesRPG.fenceH },
+      { x: 5, y: 6, frame: TilesRPG.fenceHEnd },
+      // Fence in front of Inn
+      { x: 16, y: 6, frame: TilesRPG.fenceH },
+      { x: 17, y: 6, frame: TilesRPG.fenceHMid },
+      { x: 18, y: 6, frame: TilesRPG.fenceH },
+      { x: 19, y: 6, frame: TilesRPG.fenceHEnd },
+    ];
+    for (const d of decor) {
+      if (!this.inTownBounds(d.x, d.y)) continue;
+      this.add
+        .image(d.x * TILE_SIZE + TILE_SIZE / 2, d.y * TILE_SIZE + TILE_SIZE / 2, ASSET_KEYS.sprites.rpg, d.frame)
+        .setScale(RENDER_SCALE)
+        .setDepth(5);
+    }
   }
 
   private drawPlayer(): void {

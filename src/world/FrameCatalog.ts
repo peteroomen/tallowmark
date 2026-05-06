@@ -33,52 +33,82 @@ export const INPUT_GRID = { cols: INPUT_COLS, rows: 24 } as const;
 /**
  * World tiles from the rpg-pack.
  *
- * CONFIRMED: grass, water, trees — visually verified at scale 4× in DebugSheetScene.
- * TODO: walls, doors, stairs frames need to be re-picked via the debug scene.
- *       For now, scenes draw walls/buildings as palette-tinted rectangles instead
- *       of relying on guessed frames.
+ * Frame indices verified at 3× scale via DebugSheetScene's chunked views
+ * (rpg-pack rendered as a 3×3 grid of view chunks; F9 → TAB to walk through).
+ *
+ * The water and tree frames are the high-leverage decorative wins for the
+ * town. Building wall/roof/door composition stays deferred — composing a
+ * good-looking multi-tile building from individual tiles needs more
+ * iteration than is worth right now; the rectangle buildings read as clean
+ * placeholders and the surrounding decorations (trees, bushes, fences, rocks,
+ * proper water) carry the visual weight.
  */
 export const TilesRPG = {
-  // CONFIRMED — outdoor terrain
+  // Outdoor terrain (CONFIRMED)
   grass: rpg(5, 0),
   grassAlt: rpg(4, 0),
   dirt: rpg(7, 0),
   pathStone: rpg(8, 0),
-  water: rpg(3, 1),
-  tree: rpg(13, 10),
-  treeDark: rpg(14, 10),
 
-  // TODO — these still need eyeballing in the debug scene before they look right.
-  // Until then, scenes that need these elements should draw rectangles instead.
-  flower: rpg(0, 9),
-  signpost: rpg(33, 6),
-  fenceH: rpg(2, 22),
-  fenceV: rpg(3, 22),
-  stoneFloor: rpg(7, 13),
-  stoneFloorAlt: rpg(8, 13),
-  stoneWall: rpg(10, 17),
-  stoneWallTop: rpg(10, 16),
-  stoneArch: rpg(20, 13),
-  woodWall: rpg(1, 9),
-  brickWall: rpg(2, 9),
-  roofRedTL: rpg(0, 19),
-  roofRedT: rpg(1, 19),
-  roofRedTR: rpg(2, 19),
-  roofRedBL: rpg(0, 21),
-  roofRedB: rpg(1, 21),
-  roofRedBR: rpg(2, 21),
-  doorClosed: rpg(15, 4),
-  doorOpen: rpg(15, 3),
-  windowSquare: rpg(20, 4),
-  windowArch: rpg(21, 4),
-  stairsDown: rpg(33, 13),
-  stairsUp: rpg(34, 13),
+  // Water 9-slice (CONFIRMED) — atlas at cols 2-4, rows 0-2.
+  // Use these to draw a multi-tile water body with grass shores.
+  waterTL: rpg(2, 0), // frame 2
+  waterT: rpg(3, 0), // 3
+  waterTR: rpg(4, 0), // 4
+  waterL: rpg(2, 1), // 59
+  waterC: rpg(3, 1), // 60 — also: full water alone
+  waterR: rpg(4, 1), // 61
+  waterBL: rpg(2, 2), // 116
+  waterB: rpg(3, 2), // 117
+  waterBR: rpg(4, 2), // 118
+  /** Alias for the central water tile; useful when the renderer just wants water. */
+  water: rpg(3, 1),
+
+  // Trees (CONFIRMED) — overhead "world map" style.
+  treeRound: rpg(13, 9), // 526 — full green round canopy
+  treeOrangeRound: rpg(15, 9), // 528 — orange round canopy
+  treeAutumn: rpg(13, 10), // 583 — small autumn-orange tree
+  treePine: rpg(17, 10), // 587 — small green pine
+  treePineDark: rpg(18, 10), // 588 — taller dark-green pine
+  treeBare: rpg(27, 10), // 597 — bare leafless tree
+
+  // Bushes / shrubs (CONFIRMED) — row 9 cols 19-25 area.
+  bushGreen: rpg(19, 9), // 532
+  bushOrange: rpg(20, 9), // 533 — pumpkin
+  bushDarkGreen: rpg(22, 9), // 535
+  bushSmall: rpg(23, 9), // 536
+
+  // Fences (CONFIRMED) — row 23 cols 46-50 area.
+  fenceH: rpg(46, 23), // 1357 — horizontal segment
+  fenceHMid: rpg(47, 23), // 1358
+  fenceHEnd: rpg(49, 23), // 1360 — end cap
+  fencePost: rpg(50, 23), // 1361 — vertical post
+
+  // Decoration (CONFIRMED) — rocks and debris.
+  rockSmall: rpg(54, 22), // 1308
+
+  // Dungeon entrance (CONFIRMED) — stone tomb arch, frame 624.
+  dungeonStoneArch: rpg(54, 10),
+
+  // Doors / windows (CONFIRMED at column 38+ in row 0)
+  doorWood: rpg(38, 0), // 38
+  doorWoodTall: rpg(40, 0),
+  windowArch: rpg(44, 0),
+  windowSquare: rpg(43, 1), // 100
+
+  // Items — used by future inventory work; eyeballed and not yet verified.
   potionRed: rpg(40, 9),
   potionBlue: rpg(41, 9),
   scroll: rpg(43, 8),
   swordBasic: rpg(45, 9),
   shieldBasic: rpg(48, 9),
   coin: rpg(41, 10),
+
+  // Dungeon (still TODO — wall/floor stay as rectangles in DungeonScene)
+  stoneFloor: rpg(7, 13),
+  stoneWall: rpg(10, 17),
+  stairsDown: rpg(33, 13),
+  stairsUp: rpg(34, 13),
 } as const;
 
 /**

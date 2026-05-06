@@ -12,35 +12,64 @@ interface SheetView {
   key: string;
   label: string;
   cols: number;
+  rows: number;
   rowStart: number;
   rowEnd: number;
+  colStart: number;
+  colEnd: number;
   tileSize: number;
 }
 
-function span(key: string, label: string, grid: { cols: number; rows: number }, tile: number, chunks = 1): SheetView[] {
+interface SpanOptions {
+  rowChunks?: number;
+  colChunks?: number;
+}
+
+function span(
+  key: string,
+  label: string,
+  grid: { cols: number; rows: number },
+  tile: number,
+  opts: SpanOptions = {},
+): SheetView[] {
+  const rowChunks = opts.rowChunks ?? 1;
+  const colChunks = opts.colChunks ?? 1;
   const out: SheetView[] = [];
-  const per = Math.ceil(grid.rows / chunks);
-  for (let i = 0; i < chunks; i++) {
-    const a = i * per;
-    const b = Math.min(grid.rows, a + per);
-    out.push({
-      key,
-      label: chunks > 1 ? `${label} rows ${a}–${b - 1}` : label,
-      cols: grid.cols,
-      rowStart: a,
-      rowEnd: b,
-      tileSize: tile,
-    });
+  const rowsPerChunk = Math.ceil(grid.rows / rowChunks);
+  const colsPerChunk = Math.ceil(grid.cols / colChunks);
+  for (let ri = 0; ri < rowChunks; ri++) {
+    for (let ci = 0; ci < colChunks; ci++) {
+      const rowStart = ri * rowsPerChunk;
+      const rowEnd = Math.min(grid.rows, rowStart + rowsPerChunk);
+      const colStart = ci * colsPerChunk;
+      const colEnd = Math.min(grid.cols, colStart + colsPerChunk);
+      const labelParts: string[] = [];
+      if (rowChunks > 1) labelParts.push(`r ${rowStart}–${rowEnd - 1}`);
+      if (colChunks > 1) labelParts.push(`c ${colStart}–${colEnd - 1}`);
+      out.push({
+        key,
+        label: labelParts.length ? `${label} ${labelParts.join(' ')}` : label,
+        cols: grid.cols,
+        rows: grid.rows,
+        rowStart,
+        rowEnd,
+        colStart,
+        colEnd,
+        tileSize: tile,
+      });
+    }
   }
   return out;
 }
 
+// rpg-pack chunked into 3 row-bands × 3 col-bands so each tile is readable at
+// 4× zoom with frame-index labels.
 const SHEETS: SheetView[] = [
-  ...span(ASSET_KEYS.sprites.rpg, 'rpg-pack', RPG_GRID, 16, 3),
-  ...span(ASSET_KEYS.sprites.chars, 'chars', CHARS_GRID, 16, 1),
-  ...span(ASSET_KEYS.ui.large, 'ui-large', UI_LARGE_GRID, 32, 1),
-  ...span(ASSET_KEYS.ui.small, 'ui-small', UI_SMALL_GRID, 16, 1),
-  ...span(ASSET_KEYS.ui.inputs, 'inputs', INPUT_GRID, 16, 3),
+  ...span(ASSET_KEYS.sprites.rpg, 'rpg', RPG_GRID, 16, { rowChunks: 3, colChunks: 3 }),
+  ...span(ASSET_KEYS.sprites.chars, 'chars', CHARS_GRID, 16),
+  ...span(ASSET_KEYS.ui.large, 'ui-large', UI_LARGE_GRID, 32),
+  ...span(ASSET_KEYS.ui.small, 'ui-small', UI_SMALL_GRID, 16),
+  ...span(ASSET_KEYS.ui.inputs, 'inputs', INPUT_GRID, 16, { rowChunks: 3 }),
 ];
 
 export const DEBUG_SHEET_SCENE_KEY = 'DebugSheet';
@@ -111,41 +140,43 @@ export class DebugSheetScene extends Phaser.Scene {
     }
 
     const visibleRows = view.rowEnd - view.rowStart;
-    const sheetPxW = view.cols * view.tileSize;
+    const visibleCols = view.colEnd - view.colStart;
+    const sheetPxW = visibleCols * view.tileSize;
     const sheetPxH = visibleRows * view.tileSize;
     const maxW = GAME_WIDTH - 32;
     const maxH = GAME_HEIGHT - 80;
     const scale = Math.max(1, Math.min(Math.floor(maxW / sheetPxW), Math.floor(maxH / sheetPxH)));
 
     const cellPx = view.tileSize * scale;
-    const totalW = view.cols * cellPx;
+    const totalW = visibleCols * cellPx;
     const totalH = visibleRows * cellPx;
     const ox = Math.floor((GAME_WIDTH - totalW) / 2);
     const oy = Math.floor((GAME_HEIGHT - totalH) / 2) + 8;
 
     this.headerText.setText(
-      `[${this.idx + 1}/${SHEETS.length}] ${view.label} — ${view.cols}×${view.rowEnd - view.rowStart} cells @ ${scale}× (frames ${view.rowStart * view.cols}..${view.rowEnd * view.cols - 1})`,
+      `[${this.idx + 1}/${SHEETS.length}] ${view.label} — ${visibleCols}×${visibleRows} cells @ ${scale}×`,
     );
 
     const grid = this.add.graphics();
     grid.lineStyle(1, 0x222230, 0.6);
-    for (let c = 0; c <= view.cols; c++) grid.lineBetween(ox + c * cellPx, oy, ox + c * cellPx, oy + totalH);
+    for (let c = 0; c <= visibleCols; c++) grid.lineBetween(ox + c * cellPx, oy, ox + c * cellPx, oy + totalH);
     for (let r = 0; r <= visibleRows; r++) grid.lineBetween(ox, oy + r * cellPx, ox + totalW, oy + r * cellPx);
     this.container.add(grid);
 
     for (let r = view.rowStart; r < view.rowEnd; r++) {
-      for (let c = 0; c < view.cols; c++) {
+      for (let c = view.colStart; c < view.colEnd; c++) {
         const frameIdx = r * view.cols + c;
         const screenR = r - view.rowStart;
-        const px = ox + c * cellPx + cellPx / 2;
+        const screenC = c - view.colStart;
+        const px = ox + screenC * cellPx + cellPx / 2;
         const py = oy + screenR * cellPx + cellPx / 2;
         const img = this.add.image(px, py, view.key, frameIdx).setScale(scale).setOrigin(0.5);
         this.container.add(img);
         if (cellPx >= 24) {
           const t = this.add
-            .text(ox + c * cellPx + 1, oy + screenR * cellPx + 1, `${frameIdx}`, {
+            .text(ox + screenC * cellPx + 1, oy + screenR * cellPx + 1, `${frameIdx}`, {
               fontFamily: 'monospace',
-              fontSize: '8px',
+              fontSize: cellPx >= 48 ? '10px' : '8px',
               color: '#ffd76a',
               backgroundColor: '#0009',
             })
