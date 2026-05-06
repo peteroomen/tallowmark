@@ -57,7 +57,11 @@ if (import.meta.env.DEV) {
       const active = game.scene.getScenes(true)[0];
       const returnTo = active?.scene.key ?? SCENE_KEYS.MainMenu;
       if (returnTo === DEBUG_SHEET_SCENE_KEY) return;
-      game.scene.stop(returnTo);
+      // Pause (not stop) so the underlying scene's state — dungeon seed,
+      // player position, run progress — is preserved when ESC closes the
+      // inspector. The inspector itself launches alongside, then on ESC it
+      // resumes the underlying scene.
+      game.scene.pause(returnTo);
       game.scene.start(DEBUG_SHEET_SCENE_KEY, { returnTo });
     }
   });

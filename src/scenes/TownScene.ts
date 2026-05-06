@@ -554,17 +554,12 @@ export class TownScene extends Phaser.Scene {
     this.editorUi = this.buildEditorUi();
     this.updateEditStatus('paint');
 
-    // Bind editor keys via Phaser's specific keydown-* events so they don't
-    // collide with the generic onKey handler (which also handles movement
-    // 's', 'a' etc.). preventDefault stops the browser from doing anything
-    // odd with these keys.
+    // Bind a single generic keydown listener for the editor — Phaser's
+    // specific `keydown-Z` events don't always propagate `e.shiftKey`
+    // reliably across input automation tools, which broke the Shift+Z
+    // redo flow in QA. Branching on the raw event is more robust.
     const kb = this.input.keyboard;
-    if (kb) {
-      kb.on('keydown-Z', this.onEditZ, this);
-      kb.on('keydown-Y', this.onEditRedoKey, this);
-      kb.on('keydown-S', this.onEditSaveKey, this);
-      kb.on('keydown-E', this.onEditExportKey, this);
-    }
+    if (kb) kb.on('keydown', this.onEditKey, this);
   }
 
   private exitEditMode(): void {
@@ -576,32 +571,32 @@ export class TownScene extends Phaser.Scene {
     this.editorUi = undefined;
 
     const kb = this.input.keyboard;
-    if (kb) {
-      kb.off('keydown-Z', this.onEditZ, this);
-      kb.off('keydown-Y', this.onEditRedoKey, this);
-      kb.off('keydown-S', this.onEditSaveKey, this);
-      kb.off('keydown-E', this.onEditExportKey, this);
-    }
+    if (kb) kb.off('keydown', this.onEditKey, this);
   }
 
-  private onEditZ(e: KeyboardEvent): void {
-    e.preventDefault();
-    if (e.shiftKey) this.applyRedo();
-    else this.applyUndo();
-  }
-  private onEditRedoKey(e: KeyboardEvent): void {
-    e.preventDefault();
-    this.applyRedo();
-  }
-  private onEditSaveKey(e: KeyboardEvent): void {
-    e.preventDefault();
-    saveMapToLocal(TOWN_MAP_KEY, this.mapData);
-    this.updateEditStatus('saved to localStorage');
-  }
-  private onEditExportKey(e: KeyboardEvent): void {
-    e.preventDefault();
-    downloadMapAsTiledJSON(this.mapData, 'town.json');
-    this.updateEditStatus('exported town.json');
+  private onEditKey(e: KeyboardEvent): void {
+    const key = (e.key ?? '').toLowerCase();
+    const code = e.code ?? '';
+    const isZ = key === 'z' || code === 'KeyZ';
+    const isY = key === 'y' || code === 'KeyY';
+    const isS = key === 's' || code === 'KeyS';
+    const isE = key === 'e' || code === 'KeyE';
+
+    if (isZ && !e.shiftKey) {
+      e.preventDefault();
+      this.applyUndo();
+    } else if ((isZ && e.shiftKey) || isY) {
+      e.preventDefault();
+      this.applyRedo();
+    } else if (isS) {
+      e.preventDefault();
+      saveMapToLocal(TOWN_MAP_KEY, this.mapData);
+      this.updateEditStatus('saved to localStorage');
+    } else if (isE) {
+      e.preventDefault();
+      downloadMapAsTiledJSON(this.mapData, 'town.json');
+      this.updateEditStatus('exported town.json');
+    }
   }
 
   private buildEditorUi(): Phaser.GameObjects.Container {

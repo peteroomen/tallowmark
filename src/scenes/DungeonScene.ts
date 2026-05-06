@@ -65,8 +65,8 @@ export class DungeonScene extends Phaser.Scene {
 
   private autoPath: Point[] = [];
   private autoStepTimer = 0;
-  /** ms remaining before auto-transitioning to DeathSummary; -1 means inactive. */
-  private deathTimerMs = -1;
+  /** True once the death sequence has been started; used to avoid double-firing. */
+  private deathSequenceStarted = false;
 
   constructor() {
     super(SCENE_KEYS.Dungeon);
@@ -75,6 +75,15 @@ export class DungeonScene extends Phaser.Scene {
   create(data: DungeonSceneData): void {
     const services = getServices(this);
     services.audio.playMusic('dungeon');
+
+    // Scenes are reused — reset transient state.
+    this.deathSequenceStarted = false;
+    this.autoPath = [];
+    this.autoStepTimer = 0;
+    this.enemies = [];
+    this.enemySprites.clear();
+    this.logLines = [];
+    this.cameras.main.resetFX();
 
     this.runState =
       data.resume && services.save.loadRun()
@@ -105,6 +114,20 @@ export class DungeonScene extends Phaser.Scene {
     this.input.on('pointermove', (p: Phaser.Input.Pointer) => this.onMouseMove(p));
     this.input.keyboard?.on('keydown', (e: KeyboardEvent) => this.onKey(e));
 
+    // Belt-and-suspenders wait keys: Phaser's specific keydown-* events
+    // sometimes fire when the generic keydown handler doesn't (different
+    // input layers, different e.key/e.code reporting). Bind PERIOD and
+    // NUMPAD_FIVE explicitly so '.' and '5' both wait reliably.
+    const kb = this.input.keyboard;
+    if (kb) {
+      kb.on('keydown-PERIOD', () => {
+        if (this.player.alive) this.tryStep(this.player.pos);
+      });
+      kb.on('keydown-NUMPAD_FIVE', () => {
+        if (this.player.alive) this.tryStep(this.player.pos);
+      });
+    }
+
     services.save.saveRun(this.runState);
     if (!data.resume) {
       this.log(`You enter the dungeon. Seed: ${this.runState.seed}.`);
@@ -129,19 +152,10 @@ export class DungeonScene extends Phaser.Scene {
   }
 
   override update(_time: number, delta: number): void {
-    // Safety net: if the player is dead but no death timer has been started
-    // (rare race seen in QA), kick one off so we always transition to the
-    // DeathSummary scene rather than freezing.
-    if (!this.player.alive && this.deathTimerMs < 0) {
-      this.deathTimerMs = 600;
-    }
-    if (this.deathTimerMs >= 0) {
-      this.deathTimerMs -= delta;
-      if (this.deathTimerMs <= 0) {
-        this.deathTimerMs = -1;
-        this.toDeathSummary();
-        return;
-      }
+    // Safety net: if the player has died but the death sequence wasn't kicked
+    // off (e.g. a state mutation outside endRound), trigger it now.
+    if (!this.player.alive && !this.deathSequenceStarted) {
+      this.handlePlayerDeath();
     }
 
     if (this.autoPath.length > 0 && this.player.alive) {
@@ -737,12 +751,20 @@ export class DungeonScene extends Phaser.Scene {
   }
 
   private handlePlayerDeath(): void {
+    if (this.deathSequenceStarted) return;
+    this.deathSequenceStarted = true;
     this.autoPath = [];
     this.destinationMarker.setVisible(false);
     this.runState.ended = { reason: 'death', turn: this.runState.turn };
     getServices(this).save.saveRun(this.runState);
-    // Counted in update() — see `deathTimerMs`.
-    this.deathTimerMs = 600;
+
+    // Use camera fade for the death transition. Phaser's camera effects run
+    // off the camera's own update loop, which fires reliably regardless of
+    // whatever else might be happening in the scene update cycle (the QA pass
+    // showed our previous update-loop timer didn't always fire).
+    const cam = this.cameras.main;
+    cam.fadeOut(500, 0, 0, 0);
+    cam.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => this.toDeathSummary());
   }
 
   private completeRunSurvived(): void {

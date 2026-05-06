@@ -120,8 +120,11 @@ export class DebugSheetScene extends Phaser.Scene {
       this.renderSheet();
     });
     this.input.keyboard?.on('keydown-ESC', () => {
+      // Resume the underlying scene we paused when F9 was pressed; stop
+      // ourselves. Avoids re-running the underlying scene's create() which
+      // would re-roll the dungeon seed and double-log the entry message.
+      this.scene.resume(this.returnTo);
       this.scene.stop();
-      this.scene.start(this.returnTo);
     });
 
     this.renderSheet();
