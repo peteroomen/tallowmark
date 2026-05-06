@@ -96,13 +96,43 @@ export class SaveStore {
 
   private migrateRun(input: unknown): RunState | null {
     if (!input || typeof input !== 'object') return null;
-    const r = input as Partial<RunState>;
-    if (r.schemaVersion !== RUN_SCHEMA_VERSION) return null;
-    // Default newly-added fields so older in-flight saves load cleanly.
+    const r = input as Omit<Partial<RunState>, 'schemaVersion'> & { schemaVersion?: number };
+    // Schema 1 → 2: introduce hunger / inventory / identifications /
+    // activeStatuses. Old in-flight runs load with sensible defaults rather
+    // than getting wiped — losing a run mid-floor to a schema bump would be
+    // miserable. Newly-added fields can be undefined on the input.
+    if (r.schemaVersion !== 1 && r.schemaVersion !== RUN_SCHEMA_VERSION) return null;
     return {
       ...r,
+      schemaVersion: RUN_SCHEMA_VERSION,
       kills: r.kills ?? 0,
       exploredTiles: Array.isArray(r.exploredTiles) ? r.exploredTiles : [],
+      food: typeof r.food === 'number' ? r.food : 200,
+      foodMax: typeof r.foodMax === 'number' ? r.foodMax : 200,
+      inventory: Array.isArray(r.inventory)
+        ? r.inventory.filter(
+            (s): s is { defId: string; count: number } =>
+              !!s && typeof s.defId === 'string' && typeof s.count === 'number',
+          )
+        : [],
+      identifications:
+        r.identifications && typeof r.identifications === 'object'
+          ? {
+              labels:
+                r.identifications.labels && typeof r.identifications.labels === 'object'
+                  ? { ...r.identifications.labels }
+                  : {},
+              identified: Array.isArray(r.identifications.identified)
+                ? r.identifications.identified.filter((s) => typeof s === 'string')
+                : [],
+            }
+          : { labels: {}, identified: [] },
+      activeStatuses: Array.isArray(r.activeStatuses)
+        ? r.activeStatuses.filter(
+            (s): s is { id: string; turnsRemaining: number } =>
+              !!s && typeof s.id === 'string' && typeof s.turnsRemaining === 'number',
+          )
+        : [],
     } as RunState;
   }
 }

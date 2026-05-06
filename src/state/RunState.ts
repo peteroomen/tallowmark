@@ -7,14 +7,31 @@
  */
 
 import type { Point } from '@/core/Grid';
+import type { Identifications } from '@/items/Identification';
 
-export const RUN_SCHEMA_VERSION = 1;
+export const RUN_SCHEMA_VERSION = 2;
 
 export interface PlayerStats {
   hp: number;
   hpMax: number;
   power: number; // base attack power
   armor: number;
+}
+
+/** Plain-data inventory entry — runtime `Inventory` class is rehydrated from these on load. */
+export interface InventorySlotData {
+  defId: string;
+  count: number;
+}
+
+/**
+ * Lightweight active-status entry on the player. The full StatusEffect framework
+ * lands in stage 7; this minimal shape is enough for stage 6's Fortitude
+ * (+armor) and Poisoned (HP/turn) potions.
+ */
+export interface ActiveStatus {
+  id: string;
+  turnsRemaining: number;
 }
 
 export interface RunState {
@@ -34,11 +51,24 @@ export interface RunState {
   exploredTiles: string[];
   playerPos: Point;
   player: PlayerStats;
+  /** Hunger clock. Decrements each turn; <40 triggers starvation damage. */
+  food: number;
+  foodMax: number;
+  /** Per-run inventory state. Class instance is rehydrated from this. */
+  inventory: InventorySlotData[];
+  /** Per-run unidentified labels + identified-defs set. */
+  identifications: Identifications;
+  /** Active statuses on the player (Fortitude, Poisoned, …). */
+  activeStatuses: ActiveStatus[];
   /** Set when the run has ended; UIs check this to route to the death summary. */
   ended: { reason: 'death' | 'victory'; turn: number } | null;
 }
 
-export function newRunState(seed: number, startPos: Point): RunState {
+export function newRunState(
+  seed: number,
+  startPos: Point,
+  identifications: Identifications = { labels: {}, identified: [] },
+): RunState {
   return {
     schemaVersion: RUN_SCHEMA_VERSION,
     seed,
@@ -47,7 +77,14 @@ export function newRunState(seed: number, startPos: Point): RunState {
     kills: 0,
     exploredTiles: [],
     playerPos: { x: startPos.x, y: startPos.y },
+    // HP/power bumps are deferred to stage 11 (Wayfarer class). Keep iter-2
+    // baseline so manual playtest balance is unchanged this stage.
     player: { hp: 20, hpMax: 20, power: 4, armor: 1 },
+    food: 200,
+    foodMax: 200,
+    inventory: [{ defId: 'food_hardtack', count: 1 }],
+    identifications,
+    activeStatuses: [],
     ended: null,
   };
 }
