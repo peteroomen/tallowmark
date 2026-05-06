@@ -143,7 +143,35 @@ Run the full test plan against stages 5-11. Fix P0/P1s. Document iter-2 closeout
 ---
 
 ### Iteration 3 — Town growth & Found Founders
-**Goal:** the metaprogression loop kicks in. The town stops being a static map.
+**Goal:** the metaprogression loop kicks in. The town stops being a static map and the buildings stop being painted rectangles.
+
+**Stage 1 — Tiled migration** (1–1.5 days)
+First stage of iter 3. Replaces the in-house painter with Tiled. See "Tooling — level editor & frame inspector" further down for the full case. Trigger: hand-authored dungeon room templates and NPC placement, both of which need features the in-house painter shouldn't grow.
+
+**Stage 2 — Proper building exteriors + interior scenes** (1.5–2 days)
+The buildings in iter 2 are intentionally painted rectangles — coloured roofs, flat walls, a door rect. Once Tiled and auto-tiling are in place, replace each building with a real multi-tile composition (peaked tiled roof, wall tiles, framed door, windows, a chimney where it fits) using the existing rpg-pack frames. Reference: the sample image in `docs/` showing a campsite + market + cottages drawn in classic top-down RPG style.
+
+- **Exteriors:** each building becomes a small Tiled object built from the rpg-pack roof/wall/door/window tiles. Auto-tiling picks corners and edges. Buildings keep their footprint on the town grid; only the rendering changes.
+- **Door = portal.** Walking onto a building's door tile triggers a transition into a per-building **interior scene** (`ApothecaryInteriorScene`, `BlacksmithInteriorScene`, `InnInteriorScene`, `ShrineInteriorScene`). Interiors use the indoor tile range of the rpg-pack (wood floors, plaster walls, hearths, counters, shelves) plus any furniture frames we surface in `FrameCatalog`.
+- **Interior shape:** a small (≈10×8) hand-authored Tiled map per building, with a clearly-marked exit tile that returns to TownScene at the door's tile. Interiors are paused-on-leave so re-entry is instant.
+- **NPCs slot here.** The Found Founders below live *inside* their respective buildings once rescued — interior scenes are where the shop UI and dialogue land. Empty pre-rescue (just furniture); furnished + populated post-rescue.
+- **Touch-friendly entry:** door tiles are normal walkable cells in TownScene; tap-to-walk plus a confirm-to-enter prompt (mirrors dungeon descent UX).
+
+> **Why now and not earlier:** composing a good-looking multi-tile building from `add.image()` calls per tile is a maintenance trap. With Tiled in place we author each building once and the Tiled JSON drives both rendering and collision. The interior scenes also hang on the same scene/transition pattern Town↔Dungeon already uses, so the cost of adding them is mostly authoring, not engineering.
+
+**Stage 3 — Dungeon visual pass** (1–1.5 days)
+The dungeon currently renders as palette-tinted rectangles — `0x32323a` walls, `0x6a6470` floors. That was the right call in iter 1/2 (focus on systems, defer art), but it ages badly the moment the rest of the world has real tiles. Replace the rect renderer with a proper tileset using `kenney_roguelike-caves-dungeons` (the `roguelikeDungeon_transparent.png` sheet — same 16×16 + 1px gutter Kenney standard, 29×18 frames).
+
+- **Wire the new sheet** through `ASSET_KEYS.sprites.dungeon` and a `TilesDungeon` block in `FrameCatalog.ts`. Verified frame indices via the F9 inspector; same convention as the rpg-pack catalog.
+- **Auto-tiled walls + floors** via Tiled's terrain set: paint a wall and Tiled picks the right corner / edge / interior frame. Solves the classic "wall sprite tileset puzzle" once.
+- **Floor variants** — scatter alt-floor frames at ~1-in-8 ratio so corridors don't look stamped (mirrors the `grassAlt` pattern shipping in iter-2 town v3).
+- **Stairs / doors / chests** as proper tile sprites — replaces the amber rectangle for stairs-down and the brown rect for doors.
+- **Floor biomes seeded.** The same renderer drives multiple visual themes by swapping the active tile palette: **Caves** (organic, mossy stone — caves-dungeons pack as-is), **Crypts** (the bone / sarcophagus row of the same pack, plus rpg-pack gravestones), **Ruins** (rpg-pack stone block frames). Iter-3 ships caves only; the other two slot in alongside iteration 5's biome rotation work.
+- **No data-layer changes.** `TileKind` stays the same — only the renderer in `DungeonScene.drawTiles` swaps from `add.rectangle` to `add.image` with frame lookups via the auto-tile pass.
+
+> **Why this lives here, not earlier:** the dungeon's rectangle look is *deliberately* placeholder — every iter-2 stage 4–11 issue is a system bug or a UX issue, not a "the floor isn't pretty" issue. Pulling the dungeon visual pass into iter 2 would cost a day and obscure the actual feedback signal (does the system work?). Once Tiled is in (iter-3 stage 1), painting and auto-tiling the dungeon is cheap.
+
+**Stage 4 — Found Founders system** — see below.
 
 #### The Found Founders system
 Specialists are NPCs you rescue from specific dungeon floors. Once rescued, they appear permanently in town and offer services that you upgrade with meta-resources.
