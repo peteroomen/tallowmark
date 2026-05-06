@@ -21,6 +21,7 @@ import { TileKind, TILES } from '@/world/Tile';
 import { CharsSheet, Inputs, UiLarge } from '@/world/FrameCatalog';
 import { KenneyPlank } from '@/ui/KenneyPlank';
 import { HpBar } from '@/ui/HpBar';
+import { HungerBar } from '@/ui/HungerBar';
 import { FogMask, fogKey } from '@/ui/FogMask';
 import { computeFov } from '@/core/Fov';
 import { GameEventBus, type LogTone } from '@/core/Events';
@@ -29,6 +30,16 @@ import { findPath, findPathToBump } from '@/core/Pathfinding';
 import { chebyshev, type Point } from '@/core/Grid';
 import { newRunState, type RunState } from '@/state/RunState';
 import { getServices } from '@/services';
+import { buildIdentifications, displayName } from '@/items/Identification';
+import { getItemDef } from '@/items/ItemCatalog';
+import { placeItems, type ItemPlacement } from '@/world/Dungeon/ItemPlacement';
+import {
+  STARVATION_THRESHOLD,
+  statusArmorBonus,
+  tickHunger,
+  tickStatuses,
+  type TickEvent,
+} from '@/state/PlayerTick';
 
 interface DungeonSceneData {
   fresh?: boolean;
@@ -97,6 +108,12 @@ export class DungeonScene extends Phaser.Scene {
   private logTextSlots: Phaser.GameObjects.Text[] = [];
   private logLines: Array<{ tone: LogTone; message: string }> = [];
   private hpBar!: HpBar;
+  private hungerBar!: HungerBar;
+  private hungerText!: Phaser.GameObjects.Text;
+  private statusText!: Phaser.GameObjects.Text;
+
+  /** Item entities on the floor — `pos` mirrors data, sprite mirrors render. */
+  private items: Array<ItemPlacement & { sprite?: Phaser.GameObjects.Image }> = [];
   /** Game event bus — combat / status / item code emits, UI subscribes. */
   private bus = new GameEventBus();
 
@@ -138,10 +155,14 @@ export class DungeonScene extends Phaser.Scene {
     this.bus.clear();
     this.cameras.main.resetFX();
 
-    this.runState =
-      data.resume && services.save.loadRun()
-        ? services.save.loadRun()!
-        : newRunState(Date.now() & 0x7fffffff, { x: 0, y: 0 });
+    this.items = [];
+    if (data.resume && services.save.loadRun()) {
+      this.runState = services.save.loadRun()!;
+    } else {
+      const seed = Date.now() & 0x7fffffff;
+      const seedRng = Rng.fromSeed(seed);
+      this.runState = newRunState(seed, { x: 0, y: 0 }, buildIdentifications(seedRng));
+    }
 
     this.rng = Rng.fromSeed(this.runState.seed);
     this.combat = new CombatSystem(this.rng);
@@ -155,7 +176,9 @@ export class DungeonScene extends Phaser.Scene {
     this.player = new Player(this.runState.playerPos, { ...this.runState.player });
 
     this.spawnEnemies();
+    this.spawnItems();
     this.drawTiles();
+    this.drawItems();
     this.drawHoverAndMarker();
     this.drawActors();
     this.drawHud();
@@ -172,6 +195,9 @@ export class DungeonScene extends Phaser.Scene {
     this.recomputeFov();
 
     this.turnEngine.onWorldTick(() => this.runEnemyTurns());
+    // Hunger + status ticks fire after enemy turns so any death this turn
+    // (starvation, poison) is resolved together with combat damage.
+    this.turnEngine.onWorldTick(() => this.runPlayerTicks());
 
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => this.onClick(p));
     this.input.on('pointermove', (p: Phaser.Input.Pointer) => this.onMouseMove(p));
@@ -389,35 +415,71 @@ export class DungeonScene extends Phaser.Scene {
   private drawHud(): void {
     const stroke = { stroke: '#1a1a24', strokeThickness: 3 };
 
-    // Stat plank — backs HP bar + Pow/Arm text on the top-left.
+    // Stat plank — backs HP/Hunger bars + numeric labels.
     new KenneyPlank({
       scene: this,
       x: 4,
       y: 4,
-      width: 320,
-      height: 36,
+      width: 360,
+      height: 60,
       variant: 'wood',
     })
       .setScrollFactor(0)
       .setDepth(99);
 
-    // HP bar (left) + numeric HP/Pow/Arm (right of bar).
+    // HP bar (top row) + numeric HP/Pow/Arm (right of bar).
     this.hpBar = new HpBar({
       scene: this,
       x: 14,
-      y: 22,
+      y: 18,
       width: 110,
-      height: 14,
+      height: 12,
       originX: 0,
       originY: 0.5,
     });
     this.hpBar.setScrollFactor(0).setDepth(1000);
 
     this.hpText = this.add
-      .text(132, 14, '', {
+      .text(132, 12, '', {
         fontFamily: 'monospace',
-        fontSize: '13px',
+        fontSize: '12px',
         color: '#e5e3d8',
+        ...stroke,
+      })
+      .setOrigin(0, 0)
+      .setScrollFactor(0)
+      .setDepth(1000);
+
+    // Hunger bar (bottom row of the stat plank) + numeric food + status icons.
+    this.hungerBar = new HungerBar({
+      scene: this,
+      x: 14,
+      y: 42,
+      width: 110,
+      height: 10,
+      originX: 0,
+      originY: 0.5,
+    });
+    this.hungerBar.setScrollFactor(0).setDepth(1000);
+
+    this.hungerText = this.add
+      .text(132, 36, '', {
+        fontFamily: 'monospace',
+        fontSize: '12px',
+        color: '#cfcfd5',
+        ...stroke,
+      })
+      .setOrigin(0, 0)
+      .setScrollFactor(0)
+      .setDepth(1000);
+
+    // Status row — minimal stage-6 strip ("Fort 14  Psn 3"). Stage 7 will
+    // replace this with proper 16x16 icons.
+    this.statusText = this.add
+      .text(220, 36, '', {
+        fontFamily: 'monospace',
+        fontSize: '11px',
+        color: '#d4a24c',
         ...stroke,
       })
       .setOrigin(0, 0)
@@ -512,7 +574,7 @@ export class DungeonScene extends Phaser.Scene {
       },
     ];
     let x = GAME_WIDTH - 24;
-    const y = 56;
+    const y = 80;
     for (const it of items) {
       const slice = this.add
         .nineslice(x, y, ASSET_KEYS.ui.large, it.frame, 36, 36, 6, 6, 6, 6)
@@ -586,8 +648,16 @@ export class DungeonScene extends Phaser.Scene {
 
   private refreshHud(): void {
     const stats = this.player.stats;
+    const armorBonus = statusArmorBonus(this.runState);
+    const armorStr = armorBonus > 0 ? `${stats.armor}+${armorBonus}` : `${stats.armor}`;
     this.hpBar.setHp(stats.hp, stats.hpMax);
-    this.hpText.setText(`${stats.hp}/${stats.hpMax}   Pow ${stats.power}   Arm ${stats.armor}`);
+    this.hpText.setText(`HP ${stats.hp}/${stats.hpMax}   Pow ${stats.power}   Arm ${armorStr}`);
+    this.hungerBar.setFood(this.runState.food, this.runState.foodMax);
+    const hungerLabel =
+      this.runState.food === 0 ? 'STARVING' : this.runState.food < STARVATION_THRESHOLD ? 'Hungry' : 'Fed';
+    this.hungerText.setText(`Food ${this.runState.food}/${this.runState.foodMax}  ${hungerLabel}`);
+    const statusBits = this.runState.activeStatuses.map((s) => `${s.id} ${s.turnsRemaining}`);
+    this.statusText.setText(statusBits.join('  '));
     this.floorText.setText(`Floor ${this.runState.floor}    Turn ${this.runState.turn}`);
   }
 
@@ -805,6 +875,7 @@ export class DungeonScene extends Phaser.Scene {
       this.player.pos = { ...target };
       this.runState.playerPos = { ...target };
       this.tweenTo(this.playerSprite, target);
+      this.tryPickup();
     });
   }
 
@@ -949,6 +1020,136 @@ export class DungeonScene extends Phaser.Scene {
       e.ai.takeTurn(e, ctx);
       if (!this.player.alive) break;
     }
+  }
+
+  private spawnItems(): void {
+    const occupied = this.enemies.map((e) => ({ x: e.pos.x, y: e.pos.y }));
+    const placements = placeItems(this.dungeon, this.rng, {
+      floor: this.runState.floor,
+      occupied,
+    });
+    for (const p of placements) this.items.push({ ...p });
+  }
+
+  private drawItems(): void {
+    for (const item of this.items) {
+      const def = getItemDef(item.defId);
+      if (!def) continue;
+      const w = tileToWorld(item.pos.x, item.pos.y);
+      item.sprite = this.add
+        .image(w.x, w.y, ASSET_KEYS.sprites.rpg, def.iconFrame)
+        .setScale(RENDER_SCALE)
+        .setOrigin(0.5)
+        .setDepth(7); // below actors (9-10), above floor tiles
+    }
+  }
+
+  /** Picks up any item the player is standing on; logs + adds to inventory. */
+  private tryPickup(): void {
+    const idx = this.items.findIndex((it) => it.pos.x === this.player.pos.x && it.pos.y === this.player.pos.y);
+    if (idx < 0) return;
+    const item = this.items[idx]!;
+    const def = getItemDef(item.defId);
+    if (!def) return;
+    // Stack into existing slot or push a new one (data-side mirror of the
+    // Inventory class — simpler than instantiating the class here, since
+    // RunState is JSON anyway).
+    const existing = def.stackable ? this.runState.inventory.find((s) => s.defId === def.id) : null;
+    if (existing) existing.count += 1;
+    else this.runState.inventory.push({ defId: def.id, count: 1 });
+    item.sprite?.destroy();
+    this.items.splice(idx, 1);
+    const name = displayName(this.runState.identifications, def);
+    this.log(`Picked up ${name}.`, 'discovery');
+  }
+
+  private runPlayerTicks(): void {
+    if (!this.player.alive) return;
+    const events: TickEvent[] = [...tickStatuses(this.runState), ...tickHunger(this.runState)];
+    // Statuses + hunger can move HP independent of combat. Mirror the data
+    // layer's HP back onto the runtime Player object.
+    this.player.stats.hp = this.runState.player.hp;
+    if (this.player.stats.hp <= 0) this.player.alive = false;
+
+    for (const ev of events) {
+      if (ev.kind === 'hungerDanger') {
+        this.log('You feel hungry.', 'danger');
+      } else if (ev.kind === 'starvationDamage') {
+        this.log('You are starving!', 'danger');
+        this.bus.emit({
+          kind: 'floatingText',
+          spec: { tile: { ...this.player.pos }, text: '-1', color: FT_COLOR_DAMAGE, size: 'small' },
+        });
+      } else if (ev.kind === 'poisonDamage') {
+        this.bus.emit({
+          kind: 'floatingText',
+          spec: { tile: { ...this.player.pos }, text: '-1', color: '#7ac74c', size: 'small' },
+        });
+      } else if (ev.kind === 'statusExpired') {
+        this.log(`Status faded: ${ev.statusId}.`, 'neutral');
+      }
+    }
+  }
+
+  // ---------- Public API for the InventoryScene overlay ----------
+
+  /** Mapping scroll: mark every floor tile as explored, redraw fog. */
+  public applyRevealFloor(): void {
+    for (let y = 0; y < this.dungeon.tiles.height; y++) {
+      for (let x = 0; x < this.dungeon.tiles.width; x++) {
+        if (this.isWalkable(x, y)) this.exploredTiles.add(fogKey(x, y));
+      }
+    }
+    this.runState.exploredTiles = Array.from(this.exploredTiles);
+    this.fogMask?.update(this.visibleTiles, this.exploredTiles);
+    this.log('You glimpse the floor below.', 'discovery');
+  }
+
+  /** Blinking scroll: teleport the player to a random visible tile. */
+  public applyBlink(): void {
+    const candidates: Point[] = [];
+    for (const key of this.visibleTiles) {
+      const [xs, ys] = key.split(',');
+      const x = Number(xs);
+      const y = Number(ys);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      if (!this.isWalkable(x, y)) continue;
+      if (this.enemyAt(x, y)) continue;
+      if (x === this.player.pos.x && y === this.player.pos.y) continue;
+      candidates.push({ x, y });
+    }
+    if (candidates.length === 0) {
+      this.log('Reality shudders, but nowhere calls.', 'neutral');
+      return;
+    }
+    const target = this.rng.pick(candidates);
+    this.player.pos = { ...target };
+    this.runState.playerPos = { ...target };
+    const w = tileToWorld(target.x, target.y);
+    this.playerSprite.setPosition(w.x, w.y);
+    this.recomputeFov();
+  }
+
+  /** Append a log line emitted from another scene (e.g. inventory use). */
+  public applyExternalLog(message: string): void {
+    this.log(message, 'neutral');
+  }
+
+  /**
+   * After the inventory scene mutates the run state and saves it, the dungeon
+   * scene rehydrates so HP / food / armor bonus / inventory all reflect the
+   * latest state. Called by InventoryScene on close.
+   */
+  public reloadFromSavedState(): void {
+    const fresh = getServices(this).save.loadRun();
+    if (!fresh) return;
+    this.runState = fresh;
+    this.player.stats.hp = fresh.player.hp;
+    this.player.stats.hpMax = fresh.player.hpMax;
+    this.player.stats.power = fresh.player.power;
+    this.player.stats.armor = fresh.player.armor;
+    if (this.player.stats.hp <= 0) this.player.alive = false;
+    this.refreshHud();
   }
 
   private cleanupDeadEnemies(): void {
