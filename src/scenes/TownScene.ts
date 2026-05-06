@@ -125,15 +125,30 @@ export class TownScene extends Phaser.Scene {
       tileHeight: TILE_SIZE_SOURCE,
       tileset: 'rpg',
     });
-    // Terrain layer — base ground. Defaults to grass everywhere.
+    // Terrain layer — base ground. Defaults to grass everywhere, with
+    // scattered grassAlt for visual variety so the field doesn't look flat.
     const terrain = requireLayer(map, TERRAIN_LAYER);
     for (let y = 0; y < TOWN_H; y++) {
-      for (let x = 0; x < TOWN_W; x++) setTile(terrain, x, y, TilesRPG.grass);
+      for (let x = 0; x < TOWN_W; x++) {
+        // Deterministic checker-noise pattern — about 1 in 6 tiles get the
+        // alt grass frame. Stable across reloads since it's pure x/y math.
+        const alt = (x * 7 + y * 11) % 13 === 0 || (x * 3 + y * 5) % 17 === 0;
+        setTile(terrain, x, y, alt ? TilesRPG.grassAlt : TilesRPG.grass);
+      }
     }
+    // Main horizontal road across the middle of town.
     for (let x = 0; x < TOWN_W; x++) setTile(terrain, x, 8, TilesRPG.dirt);
+    // Vertical stone path leading up to the dungeon arch.
     for (let y = 8; y < DUNGEON_ENTRANCE.y; y++) {
-      setTile(terrain, DUNGEON_ENTRANCE.x + 1, y, TilesRPG.dirt);
+      setTile(terrain, DUNGEON_ENTRANCE.x + 1, y, TilesRPG.pathStone);
+      setTile(terrain, DUNGEON_ENTRANCE.x + 2, y, TilesRPG.pathStone);
     }
+    // Short dirt stubs from the road up to each row-2 building's door.
+    for (const bx of [4, 11, 18]) {
+      for (let y = 6; y <= 7; y++) setTile(terrain, bx, y, TilesRPG.dirt);
+    }
+    // Path stub from row-11 Upgrade Shrine south down to bottom edge.
+    for (let y = 14; y < TOWN_H; y++) setTile(terrain, 4, y, TilesRPG.dirt);
 
     // Overlay layer — decorations sit on top of terrain. Default empty.
     map.layers.push({
@@ -315,51 +330,116 @@ export class TownScene extends Phaser.Scene {
   }
 
   private drawDecorations(): void {
-    // Trees, bushes, fences, rocks. Placed in the gaps between buildings so
-    // they don't overlap structures or the path. Picked from the confirmed
-    // rpg-pack frames in TilesRPG.
+    // Outdoor decorations — placed in gaps between buildings, lake, and paths.
+    // Frames come from the confirmed entries in TilesRPG.
     type Decor = { x: number; y: number; frame: number };
-    const decor: Decor[] = [
-      // Trees in the corners and gaps
-      { x: 0, y: 0, frame: TilesRPG.treePineDark },
-      { x: 23, y: 0, frame: TilesRPG.treePine },
-      { x: 0, y: 5, frame: TilesRPG.treeRound },
-      { x: 22, y: 5, frame: TilesRPG.treeAutumn },
-      { x: 7, y: 1, frame: TilesRPG.treePine },
-      { x: 7, y: 5, frame: TilesRPG.treeRound },
-      { x: 14, y: 5, frame: TilesRPG.treePineDark },
-      { x: 22, y: 6, frame: TilesRPG.treePine },
-      { x: 0, y: 14, frame: TilesRPG.treePineDark },
-      { x: 1, y: 15, frame: TilesRPG.treePine },
-      { x: 7, y: 11, frame: TilesRPG.treeRound },
-      { x: 22, y: 14, frame: TilesRPG.treeAutumn },
-      { x: 23, y: 15, frame: TilesRPG.treePineDark },
+    const decor: Decor[] = [];
 
-      // Bushes (smaller decorative)
-      { x: 1, y: 6, frame: TilesRPG.bushGreen },
-      { x: 22, y: 1, frame: TilesRPG.bushGreen },
-      { x: 14, y: 6, frame: TilesRPG.bushDarkGreen },
-      { x: 7, y: 6, frame: TilesRPG.bushSmall },
-      { x: 16, y: 14, frame: TilesRPG.bushGreen },
-      { x: 4, y: 14, frame: TilesRPG.bushOrange },
-      { x: 21, y: 14, frame: TilesRPG.bushSmall },
-
-      // Rocks
-      { x: 6, y: 14, frame: TilesRPG.rockSmall },
-      { x: 15, y: 13, frame: TilesRPG.rockSmall },
-      { x: 1, y: 9, frame: TilesRPG.rockSmall },
-
-      // Fence row in front of the Apothecary (row y=6)
-      { x: 2, y: 6, frame: TilesRPG.fenceH },
-      { x: 3, y: 6, frame: TilesRPG.fenceHMid },
-      { x: 4, y: 6, frame: TilesRPG.fenceH },
-      { x: 5, y: 6, frame: TilesRPG.fenceHEnd },
-      // Fence in front of Inn
-      { x: 16, y: 6, frame: TilesRPG.fenceH },
-      { x: 17, y: 6, frame: TilesRPG.fenceHMid },
-      { x: 18, y: 6, frame: TilesRPG.fenceH },
-      { x: 19, y: 6, frame: TilesRPG.fenceHEnd },
+    // Dense forest along the LEFT edge (col 0) and TOP-LEFT corner — this is
+    // the wilderness pressing in on the town from the west.
+    const forest: Array<[number, number, number]> = [
+      [0, 0, TilesRPG.treePineDark],
+      [0, 1, TilesRPG.treePine],
+      [0, 2, TilesRPG.treeRound],
+      [0, 3, TilesRPG.treePineDark],
+      [0, 4, TilesRPG.treePine],
+      [0, 5, TilesRPG.treeRound],
+      [0, 6, TilesRPG.treePineDark],
+      [0, 7, TilesRPG.treePine],
+      [0, 9, TilesRPG.treePineDark],
+      [0, 10, TilesRPG.treePine],
+      [0, 11, TilesRPG.treeRound],
+      [0, 12, TilesRPG.treePineDark],
+      [0, 13, TilesRPG.treePine],
+      [0, 14, TilesRPG.treeRound],
+      [0, 15, TilesRPG.treePineDark],
+      [1, 0, TilesRPG.treePine],
+      [1, 1, TilesRPG.treePineDark],
+      [1, 12, TilesRPG.treePine],
+      [1, 14, TilesRPG.treePineDark],
+      [1, 15, TilesRPG.treePine],
     ];
+    for (const [x, y, frame] of forest) decor.push({ x, y, frame });
+
+    // Top-right corner trees — bookend the town with greenery.
+    decor.push({ x: 22, y: 0, frame: TilesRPG.treePine });
+    decor.push({ x: 23, y: 0, frame: TilesRPG.treePineDark });
+    decor.push({ x: 23, y: 1, frame: TilesRPG.treeRound });
+
+    // Trees framing the buildings on row 2-5 (between buildings and lake).
+    decor.push({ x: 7, y: 1, frame: TilesRPG.treePine });
+    decor.push({ x: 8, y: 1, frame: TilesRPG.treeAutumn });
+    decor.push({ x: 14, y: 1, frame: TilesRPG.treePineDark });
+    decor.push({ x: 15, y: 1, frame: TilesRPG.treePine });
+    decor.push({ x: 21, y: 1, frame: TilesRPG.treeRound });
+
+    // Campsite — top-center, between Blacksmith and Inn (cols 6-8, row 0).
+    decor.push({ x: 6, y: 0, frame: TilesRPG.tentGreenL });
+    decor.push({ x: 7, y: 0, frame: TilesRPG.tentGreenR });
+    decor.push({ x: 8, y: 0, frame: TilesRPG.campfireLit });
+
+    // Market strip — right side between Inn and the Pond/Dungeon (cols 21-23,
+    // rows 5-7). Awning row over a table + crates/barrels under it.
+    decor.push({ x: 21, y: 5, frame: TilesRPG.awningStripeL });
+    decor.push({ x: 22, y: 5, frame: TilesRPG.awningStripeC });
+    decor.push({ x: 23, y: 5, frame: TilesRPG.awningStripeR });
+    decor.push({ x: 22, y: 6, frame: TilesRPG.tableMkt });
+    decor.push({ x: 21, y: 6, frame: TilesRPG.barrelsH });
+    decor.push({ x: 23, y: 6, frame: TilesRPG.crateWood });
+    decor.push({ x: 22, y: 7, frame: TilesRPG.anvil });
+
+    // Cemetery — bottom-right (cols 20-23, rows 12-15). A small graveyard
+    // beyond the dungeon arch with fence boundary on the north side.
+    decor.push({ x: 20, y: 12, frame: TilesRPG.fenceH });
+    decor.push({ x: 21, y: 12, frame: TilesRPG.fenceHMid });
+    decor.push({ x: 22, y: 12, frame: TilesRPG.fenceH });
+    decor.push({ x: 23, y: 12, frame: TilesRPG.fenceHEnd });
+    decor.push({ x: 20, y: 13, frame: TilesRPG.gravestone1 });
+    decor.push({ x: 22, y: 13, frame: TilesRPG.gravestone2 });
+    decor.push({ x: 21, y: 14, frame: TilesRPG.crossStone });
+    decor.push({ x: 23, y: 14, frame: TilesRPG.gravestone3 });
+    decor.push({ x: 20, y: 15, frame: TilesRPG.crossWood });
+    decor.push({ x: 22, y: 15, frame: TilesRPG.crossStone });
+
+    // Signpost / well near the dungeon entrance to mark the path.
+    decor.push({ x: 16, y: 11, frame: TilesRPG.wellStone });
+
+    // Ambient scatter — flowers, mushrooms, small rocks, the odd bush. Small
+    // touches to break up open grass.
+    const ambient: Array<[number, number, number]> = [
+      [3, 0, TilesRPG.flowerWhite],
+      [5, 1, TilesRPG.flowerRed],
+      [13, 0, TilesRPG.bushSmall],
+      [14, 6, TilesRPG.bushDarkGreen],
+      [7, 6, TilesRPG.bushSmall],
+      [15, 6, TilesRPG.flowerRed],
+      [3, 7, TilesRPG.flowerWhite],
+      [10, 7, TilesRPG.mushroomSmall],
+      [13, 7, TilesRPG.flowerRed],
+      [21, 0, TilesRPG.bushGreen],
+      [21, 7, TilesRPG.bushOrange],
+      [2, 9, TilesRPG.rockSmall],
+      [3, 10, TilesRPG.flowerWhite],
+      [6, 14, TilesRPG.mushroomTall],
+      [14, 14, TilesRPG.bushOrange],
+      [15, 13, TilesRPG.rockSmall],
+      [16, 14, TilesRPG.flowerWhite],
+      [17, 14, TilesRPG.mushroomSmall],
+      [3, 13, TilesRPG.bushGreen],
+      [5, 14, TilesRPG.flowerRed],
+      [13, 12, TilesRPG.flowerWhite],
+    ];
+    for (const [x, y, frame] of ambient) decor.push({ x, y, frame });
+
+    // Fence row in front of the Apothecary (row y=6) — short garden boundary.
+    decor.push({ x: 2, y: 6, frame: TilesRPG.fenceH });
+    decor.push({ x: 3, y: 6, frame: TilesRPG.fenceHMid });
+    decor.push({ x: 5, y: 6, frame: TilesRPG.fenceHEnd });
+    // Fence in front of Inn
+    decor.push({ x: 16, y: 6, frame: TilesRPG.fenceH });
+    decor.push({ x: 17, y: 6, frame: TilesRPG.fenceHMid });
+    decor.push({ x: 19, y: 6, frame: TilesRPG.fenceHEnd });
+
     for (const d of decor) {
       if (!this.inTownBounds(d.x, d.y)) continue;
       this.add

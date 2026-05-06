@@ -90,6 +90,47 @@ export const TilesRPG = {
   // Dungeon entrance (CONFIRMED) — stone tomb arch, frame 624.
   dungeonStoneArch: rpg(54, 10),
 
+  // Additional outdoor decorations — verified via DebugSheetScene at 3× scale.
+  // Tents, campfire, anvil (row 0 cols 10-15)
+  tentGreenL: rpg(10, 0), // 10 — left half of green tent
+  tentGreenR: rpg(11, 0), // 11 — right half
+  campfireUnlit: rpg(12, 0), // 12 — logs only
+  campfireLit: rpg(13, 0), // 13 — small flame
+  campfireBig: rpg(14, 0), // 14 — bigger flame
+  anvil: rpg(15, 0), // 15
+
+  // Barrels, crate, tent bases, market table (row 1 cols 5-12)
+  barrelsH: rpg(5, 1), // 62 — pair of barrels
+  crateWood: rpg(7, 1), // 64
+  tentGreenBaseL: rpg(10, 1), // 67
+  tentGreenBaseR: rpg(11, 1), // 68
+  tableMkt: rpg(12, 1), // 69 — market table
+
+  // Awning stripes (row 2 cols 10-12) — for market stalls
+  awningStripeL: rpg(10, 2), // 124
+  awningStripeC: rpg(11, 2), // 125
+  awningStripeR: rpg(12, 2), // 126
+
+  // Mushrooms (row 3 cols 5-6)
+  mushroomSmall: rpg(5, 3), // 176
+  mushroomTall: rpg(6, 3), // 177
+
+  // Well (row 5 col 12)
+  wellStone: rpg(12, 5), // 297
+
+  // Flowers
+  flowerWhite: rpg(0, 9), // 513
+  flowerRed: rpg(0, 6), // 342
+
+  // Gravestones (row 9 cols 7-9)
+  gravestone1: rpg(7, 9), // 520
+  gravestone2: rpg(8, 9), // 521
+  gravestone3: rpg(9, 9), // 522
+
+  // Stone crosses (row 10 cols 5-6)
+  crossStone: rpg(5, 10), // 575
+  crossWood: rpg(6, 10), // 576
+
   // Doors / windows (CONFIRMED at column 38+ in row 0)
   doorWood: rpg(38, 0), // 38
   doorWoodTall: rpg(40, 0),
