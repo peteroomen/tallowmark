@@ -64,6 +64,15 @@ export class DungeonScene extends Phaser.Scene {
 
   private playerSprite!: Phaser.GameObjects.Image;
   private enemySprites = new Map<number, Phaser.GameObjects.Image>();
+  /** Last position the player saw an enemy at — keyed by enemy id. */
+  private enemyLastSeen = new Map<number, Point>();
+  /**
+   * Translucent ghost sprites at last-seen positions. Shown when an enemy
+   * is out of the player's FoV but their last-seen tile is still in
+   * exploredTiles. Destroyed when the enemy is re-spotted (the live sprite
+   * takes over) or when the enemy dies.
+   */
+  private enemyGhostSprites = new Map<number, Phaser.GameObjects.Image>();
   private hoverHighlight!: Phaser.GameObjects.Rectangle;
   private destinationMarker!: Phaser.GameObjects.Rectangle;
 
@@ -97,6 +106,9 @@ export class DungeonScene extends Phaser.Scene {
     this.autoStepTimer = 0;
     this.enemies = [];
     this.enemySprites.clear();
+    this.enemyLastSeen.clear();
+    for (const ghost of this.enemyGhostSprites.values()) ghost.destroy();
+    this.enemyGhostSprites.clear();
     this.logLines = [];
     this.cameras.main.resetFX();
 
@@ -738,14 +750,57 @@ export class DungeonScene extends Phaser.Scene {
     for (const key of this.visibleTiles) this.exploredTiles.add(key);
     if (this.fogMask) this.fogMask.update(this.visibleTiles, this.exploredTiles);
 
-    // Hide enemy sprites that aren't in the player's FoV. Enemies still
-    // act every turn (classic roguelike behaviour); we just don't render
-    // them through walls.
+    // Enemy visibility — and "last-known position" ghost markers.
+    //
+    // Live sprite shows when the enemy is in the player's FoV. Whenever
+    // they're seen, we record their tile as the last-known position. When
+    // the enemy LEAVES the FoV (or starts off-screen), if their last-seen
+    // tile is in the explored set we render a translucent ghost there as a
+    // "you saw them last here" hint. Re-spotting them moves the live sprite
+    // back; killing them tears down both.
     for (const enemy of this.enemies) {
       const sprite = this.enemySprites.get(enemy.id);
       if (!sprite) continue;
       const visible = this.visibleTiles.has(fogKey(enemy.pos.x, enemy.pos.y));
       sprite.setVisible(visible);
+      if (visible) {
+        // Record current position; remove any stale ghost.
+        this.enemyLastSeen.set(enemy.id, { ...enemy.pos });
+        this.removeGhostFor(enemy.id);
+      } else {
+        const last = this.enemyLastSeen.get(enemy.id);
+        if (last && this.exploredTiles.has(fogKey(last.x, last.y))) {
+          this.placeGhostFor(enemy, last);
+        } else {
+          this.removeGhostFor(enemy.id);
+        }
+      }
+    }
+  }
+
+  /** Show or update the ghost marker for an enemy at the given tile. */
+  private placeGhostFor(enemy: Enemy, tile: Point): void {
+    let ghost = this.enemyGhostSprites.get(enemy.id);
+    const xy = tileToWorld(tile.x, tile.y);
+    if (!ghost) {
+      ghost = this.add
+        .image(xy.x, xy.y, ASSET_KEYS.sprites.chars, ENEMY_FRAME)
+        .setScale(RENDER_SCALE)
+        .setOrigin(0.5)
+        .setAlpha(0.4)
+        .setTint(0xb8c0d8) // cool grey-blue tint to read as "memory" not "live"
+        .setDepth(8);
+      this.enemyGhostSprites.set(enemy.id, ghost);
+    } else {
+      ghost.setPosition(xy.x, xy.y);
+    }
+  }
+
+  private removeGhostFor(id: number): void {
+    const ghost = this.enemyGhostSprites.get(id);
+    if (ghost) {
+      ghost.destroy();
+      this.enemyGhostSprites.delete(id);
     }
   }
 
@@ -797,7 +852,6 @@ export class DungeonScene extends Phaser.Scene {
       if (!e.alive) {
         const s = this.enemySprites.get(e.id);
         if (s) {
-          // Quick fade-out before destroying for a nicer feel.
           this.tweens.add({
             targets: s,
             alpha: 0,
@@ -807,6 +861,8 @@ export class DungeonScene extends Phaser.Scene {
           });
           this.enemySprites.delete(e.id);
         }
+        this.enemyLastSeen.delete(e.id);
+        this.removeGhostFor(e.id);
       }
     }
     this.enemies = this.enemies.filter((e) => e.alive);

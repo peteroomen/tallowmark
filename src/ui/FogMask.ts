@@ -38,6 +38,10 @@ export class FogMask {
   /**
    * Update the mask from the current data layer. `visible` are tiles in the
    * player's current FoV; `explored` are tiles that have ever been visible.
+   *
+   * Includes a 1-tile soft-edge feather: visible tiles that border at least
+   * one non-visible neighbour get a subtle dim overlay so the boundary
+   * doesn't read as a hard geometric edge.
    */
   update(visible: ReadonlySet<string>, explored: ReadonlySet<string>): void {
     this.gfx.clear();
@@ -45,7 +49,11 @@ export class FogMask {
       for (let x = 0; x < this.cols; x++) {
         const key = `${x},${y}`;
         if (visible.has(key)) {
-          // Currently visible — leave fully transparent.
+          // Visible tile — feather if any 8-dir neighbour is non-visible.
+          if (this.hasNonVisibleNeighbour(x, y, visible)) {
+            this.gfx.fillStyle(0x000000, 0.18);
+            this.gfx.fillRect(x * this.tilePx, y * this.tilePx, this.tilePx, this.tilePx);
+          }
           continue;
         }
         const alpha = explored.has(key) ? 0.55 : 0.92;
@@ -53,6 +61,16 @@ export class FogMask {
         this.gfx.fillRect(x * this.tilePx, y * this.tilePx, this.tilePx, this.tilePx);
       }
     }
+  }
+
+  private hasNonVisibleNeighbour(x: number, y: number, visible: ReadonlySet<string>): boolean {
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        if (!visible.has(`${x + dx},${y + dy}`)) return true;
+      }
+    }
+    return false;
   }
 
   /** Reset the mask (e.g. when descending to a new floor). */
