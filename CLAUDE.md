@@ -40,7 +40,7 @@ Run `npm run lint && npm run typecheck && npm test` before declaring a task done
    - `RunState` — wiped on death (current seed, dungeon map, inventory, HP, hunger, per-run item identity mapping).
    - `SaveStore` is the only thing that touches `localStorage`. Schema is versioned; bumping the schema requires a migration.
 
-5. **Touch-friendly from day one, even though v1 is desktop.** UI hit targets ≥ 32px. Avoid hover-only affordances. We're planning a PWA/Capacitor mobile port later — don't paint ourselves into a corner with hover-dependent UX.
+5. **Touch-friendly from day one, even though v1 is desktop.** UI hit targets ≥ **48 px (= one tile)**. Matches Apple HIG (44) / Material (48) and the world's natural unit. (Previously 32 px; bumped per design memo iter-2 stage 12.) Avoid hover-only affordances. We're planning a PWA/Capacitor mobile port later — don't paint ourselves into a corner with hover-dependent UX.
 
 6. **8-directional grid movement.** Diagonals cost the same as cardinals (classic roguelike). A* over the 8-neighbour grid.
 

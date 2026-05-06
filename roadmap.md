@@ -114,12 +114,13 @@ Second enemy archetype — teaches the player to use line-of-sight tactically.
 - Stats: 3 HP, 3 power, 0 armor — glass cannon. Spawns from floor 2+.
 - Player ranged attacks **don't** land in iter 2. Skeleton archer is the only thing with range; teaches the kiting → cover loop.
 
-**Stage 10 — Multi-Floor Descent** (½ day)
+**Stage 10 — Multi-Floor Descent + Floor Identity** (1 day, was ½)
 - Stairs-down increments `runState.floor`, regenerates the dungeon with `seed + floor`, **keeps** player state (HP, inventory, statuses, embers), **clears** `exploredTiles` (each floor is its own map).
 - Per-floor scaling: `enemy.hp = 5 + floor`, `enemy.power = 2 + Math.floor(floor / 3)`, enemy count `min(2 + floor, 8)` (already in place).
 - Stairs-up only on floor 1 — climbing exits to town with banked Embers. Deeper floors are descent-only.
 - Embers reward scales with deepest floor reached.
 - **Bosses deferred** to iter 3+. Floor 10 just shows a "you've reached the deepest known level" wrap screen for now.
+- **Floor descriptor** picked at gen time from a small pool — `Quiet` (fewer enemies, more loot, one Alarm trap that turns it into a panic), `Cramped` (corridor-heavy, archers a real threat), `Open` (large rooms, kiting works, ambushes can't), `Trapped` (double trap density, food is plentiful), `Hungry` (no food drops, descend or die). Surfaces in the floor entry log + the floor name in the HUD ("Floor 4 — *Open*"). Pulled from iter-5 polish per design memo: cheap to ship now, gives every floor an identity before biomes land.
 
 **Stage 11 — The Wayfarer** (½ day)
 Default starting class. Not a true class system — that's iter 4. This is naming + stats + starting kit so the character sheet shows a coherent identity.
@@ -128,8 +129,17 @@ Default starting class. Not a true class system — that's iter 4. This is namin
 - Starting kit: 1× Hardtack + 1× random unidentified potion in the inventory at run start
 - "Class blueprint" architecture: `entities/classes/Wayfarer.ts` defines stats + starting kit as data; future classes (iter 4: Brigand, Acolyte, Ironclad) slot into the same shape.
 
-**Stage 12 — Iter 2 manual test pass + commit**
-Run the full test plan against stages 5-11. Fix P0/P1s. Document iter-2 closeout.
+**Stage 12 — Iter 2 closeout: feel polish + manual test pass** (1 day, was ½)
+The iter-2 systems work. Stage 12 is where they start to *feel*. All five additions land alongside the manual test pass + P0/P1 triage that was always planned for this stage.
+
+- **Threshold screen** (replaces the bare "Descend?" confirm). One-screen world-state card: today's open shops, today's banked Embers, today's drop pool. One big descent button. No menu — a doorway. Speed-runners dismiss with one input; new players read it. (The optional-Goal layer the design memo proposes is deferred to iter 4 alongside Feats.)
+- **Ledger** (replaces the Death Summary). Four-card layout: cause-of-death top-left, Embers earned top-right, "what's new in town" forward-looking bottom-left, single Return-to-Town button bottom-right. The "what's new" card shows changes that will be true *next* run, never backward-looking restating of what already happened.
+- **Death beat polish** — player sprite stays visible ~300 ms after HP=0; the world *desaturates* rather than blacks out (contour visible); the "DIED" floating bouncer that's already in code hangs ~400 ms before the camera fade kicks in. Existing 600 ms timing stays; the *content* of those 600 ms is what's being spec'd.
+- **Floor descriptor surfacing** if it didn't land in stage 10 (defensive duplicate).
+- **48-px touch target floor** — `CLAUDE.md` updated from `≥ 32 px` to `≥ 48 px (= one tile)`. Existing HUD buttons (currently 36) grow to 48. Matches Apple HIG (44) / Material (48), and matches the natural unit of the world.
+- **Tap distinction (adjacent vs distant)** — current click handler always invokes `findPath`; needs a one-line check so `chebyshev(player, target) === 1` skips pathfinding and fires `tryStep(target)` directly. One rule, two behaviours, zero ambiguity.
+- **Floating-text HUD keepout** — spec a 64-px clipping border in the floating-text spawner so damage numbers never render under HUD chrome regardless of z-depth. Clipping, not just z-order.
+- **Manual test pass + closeout doc** as originally planned.
 
 ---
 
@@ -138,7 +148,7 @@ Run the full test plan against stages 5-11. Fix P0/P1s. Document iter-2 closeout
 - Action-verb model: extend onKey to `u` (use), `d` (drop), `s` (search/wait toggle)
 - Character stat aggregation: `Player.effectiveStats()` = base + equipped item bonuses (Equipment class already exists; just needs to be wired)
 
-**Iter 2 estimate (refined):** ~6–7 working days for stages 5-11, plus ½ day Stage 12 closeout.
+**Iter 2 estimate (refined):** ~6–7 working days for stages 5-11, plus 1 day Stage 12 closeout (+½ day vs the original spec to absorb the design-memo polish work).
 
 ---
 
@@ -148,16 +158,21 @@ Run the full test plan against stages 5-11. Fix P0/P1s. Document iter-2 closeout
 **Stage 1 — Tiled migration** (1–1.5 days)
 First stage of iter 3. Replaces the in-house painter with Tiled. See "Tooling — level editor & frame inspector" further down for the full case. Trigger: hand-authored dungeon room templates and NPC placement, both of which need features the in-house painter shouldn't grow.
 
-**Stage 2 — Proper building exteriors + interior scenes** (1.5–2 days)
-The buildings in iter 2 are intentionally painted rectangles — coloured roofs, flat walls, a door rect. Once Tiled and auto-tiling are in place, replace each building with a real multi-tile composition (peaked tiled roof, wall tiles, framed door, windows, a chimney where it fits) using the existing rpg-pack frames. Reference: the sample image in `docs/` showing a campsite + market + cottages drawn in classic top-down RPG style.
+**Stage 2 — Proper building exteriors + 3-tier growth + interior scenes + Town Status strip** (2.5–3 days)
+The buildings in iter 2 are intentionally painted rectangles. Once Tiled and auto-tiling are in place, replace each building with a real multi-tile composition AND give every building three exterior visual tiers driven by `PersistentState`. The "town has a state — show it" thesis from the design memo lands here: every return to town must visibly reflect what the player just spent.
 
-- **Exteriors:** each building becomes a small Tiled object built from the rpg-pack roof/wall/door/window tiles. Auto-tiling picks corners and edges. Buildings keep their footprint on the town grid; only the rendering changes.
-- **Door = portal.** Walking onto a building's door tile triggers a transition into a per-building **interior scene** (`ApothecaryInteriorScene`, `BlacksmithInteriorScene`, `InnInteriorScene`, `ShrineInteriorScene`). Interiors use the indoor tile range of the rpg-pack (wood floors, plaster walls, hearths, counters, shelves) plus any furniture frames we surface in `FrameCatalog`.
-- **Interior shape:** a small (≈10×8) hand-authored Tiled map per building, with a clearly-marked exit tile that returns to TownScene at the door's tile. Interiors are paused-on-leave so re-entry is instant.
-- **NPCs slot here.** The Found Founders below live *inside* their respective buildings once rescued — interior scenes are where the shop UI and dialogue land. Empty pre-rescue (just furniture); furnished + populated post-rescue.
-- **Touch-friendly entry:** door tiles are normal walkable cells in TownScene; tap-to-walk plus a confirm-to-enter prompt (mirrors dungeon descent UX).
+- **Exteriors:** each building authored in Tiled as **three exterior variants** (one per tier), selected at render time:
+  - **Tier 0 — Locked.** Founder not yet rescued. Boarded windows, no chimney smoke, sign missing, door interaction line: "Apothecary still missing."
+  - **Tier 1 — Founded.** Founder rescued, base shop. Sign hung, faint chimney smoke, NPC inside, basic exterior.
+  - **Tier 2 — Practiced.** Any L2+ upgrade purchased on this building. Window glow, signage, expanded exterior, ambient customer NPC.
+  - (A Tier 3 "Renowned" was proposed but cut for scope — 4 tiers × 4 buildings × ~16 tiles is real content work; revisit in iter 5 if the felt-difference still lacks headroom.)
+- **Door = portal.** Walking onto a building's door tile triggers a transition into a per-building **interior scene** (`ApothecaryInteriorScene`, `BlacksmithInteriorScene`, `InnInteriorScene`, `ShrineInteriorScene`). Interiors use the indoor tile range of the rpg-pack (wood floors, plaster walls, hearths, counters, shelves).
+- **Interior shape:** generic 10×8 layout pattern reused by all four buildings — exit tile north-centre, NPC stand position south-centre, shop-counter east-side, decoration density ~30%. Theming differs (cauldrons in Apothecary, anvil in Blacksmith, hearth + tables in Inn, runes in Shrine) but the *layout* is consistent so players don't relearn navigation per building. Paused-on-leave so re-entry is instant.
+- **NPCs slot here.** Found Founders live *inside* their respective buildings once rescued — interior scenes are where the shop UI and dialogue land. Empty pre-rescue (Tier 0 furniture only); furnished + populated post-rescue (Tier 1+).
+- **Town Status strip.** Single-line HUD element along the top of TownScene: `TALLOWMARK · DAY 14 · 2 SHOPS OPEN · 47 EMBERS · NEW: Apothecary L2 — Frost Potions now drop`. The yellow "NEW" segment is dismissable by walking into the shop it refers to. Bridges *I spent currency* → *the world is different*.
+- **Touch-friendly entry:** door tiles are normal walkable cells; tap-to-walk plus a confirm-to-enter prompt (mirrors dungeon descent UX).
 
-> **Why now and not earlier:** composing a good-looking multi-tile building from `add.image()` calls per tile is a maintenance trap. With Tiled in place we author each building once and the Tiled JSON drives both rendering and collision. The interior scenes also hang on the same scene/transition pattern Town↔Dungeon already uses, so the cost of adding them is mostly authoring, not engineering.
+> **Why the 3-tier framing matters:** without visible growth the metaprogression feels bookkept, not earned. Authoring 3 exterior variants per building once in Tiled is cheap; the *renderer* gates on `PersistentState` so the right variant shows automatically. Without this, the town becomes a static backdrop that happened to be authored in Tiled.
 
 **Stage 3 — Dungeon visual pass** (1–1.5 days)
 The dungeon currently renders as palette-tinted rectangles — `0x32323a` walls, `0x6a6470` floors. That was the right call in iter 1/2 (focus on systems, defer art), but it ages badly the moment the rest of the world has real tiles. Replace the rect renderer with a proper tileset using `kenney_roguelike-caves-dungeons` (the `roguelikeDungeon_transparent.png` sheet — same 16×16 + 1px gutter Kenney standard, 29×18 frames).
@@ -171,7 +186,22 @@ The dungeon currently renders as palette-tinted rectangles — `0x32323a` walls,
 
 > **Why this lives here, not earlier:** the dungeon's rectangle look is *deliberately* placeholder — every iter-2 stage 4–11 issue is a system bug or a UX issue, not a "the floor isn't pretty" issue. Pulling the dungeon visual pass into iter 2 would cost a day and obscure the actual feedback signal (does the system work?). Once Tiled is in (iter-3 stage 1), painting and auto-tiling the dungeon is cheap.
 
-**Stage 4 — Found Founders system** — see below.
+**Stage 4 — Action Wheel + verb resolver** (2–3 days)
+The current `u`/`d`/`s`/`q` verb-key stack works for desktop but won't survive iter 4's spell/throw/equip additions, and a phone has none of the keys. Replace with a **contextual radial Action Wheel** as the discoverability layer, with keyboard bindings as a peer (not subordinate) layer.
+
+- **Verb resolver** lifted out of `UseEffects.ts` into a generic `actions/Resolver.ts` that takes a target (self / floor tile / enemy / item-on-floor / item-in-bag / stairs / trap) and returns the valid verbs for that target. Single source of truth.
+- **Action Wheel component** — Phaser radial menu, ≥48 px slots, sized for thumbs. Slots auto-populated from the resolver. Renders above all other UI, anchored to the target with off-screen clamping.
+- **Gesture layer**:
+  - Long-press on a tile / item / self → open wheel for that target.
+  - Tap a wheel slot → fire the verb.
+  - Tap-out → dismiss without firing.
+  - Desktop: right-click also opens the wheel.
+- **Keyboard remains a peer.** Direct keys (`q` search, `g` get, `u` use, `d` drop, etc.) fire the same resolver — they're shortcut paths, not subordinate to the wheel. Both projections of the same verb set.
+- **Removes** the wait/search dual-purpose-button conflict from iter 2 stage 8 — Wait and Search become two adjacent slots on the self-target wheel.
+
+> **Estimate revisited.** Designer asked ½ day; engineering says 2–3 days. The radial menu is a new component (Phaser has no primitive), the gesture layer needs to coexist with the existing click-to-path without misfires, and the resolver lift is non-trivial. Worth doing right because every iter-4+ verb hangs off this.
+
+**Stage 5 — Found Founders system + Examine bottom-sheet + identification visual language** (2–3 days) — see below.
 
 #### The Found Founders system
 Specialists are NPCs you rescue from specific dungeon floors. Once rescued, they appear permanently in town and offer services that you upgrade with meta-resources.
@@ -191,8 +221,28 @@ Specialists are NPCs you rescue from specific dungeon floors. Once rescued, they
 #### Town upgrade tree
 Each shop has 3–5 levels. Upgrades change what spawns in the dungeon, what you start with, or what services exist between runs. Spec'd in data, not code.
 
-#### Death summary expanded
-Currency-by-source breakdown; "what's new" callouts; pending unlocks.
+#### Identification as a visual language (lands with Founders)
+Iter-2 ships 8 items with text-only identification labels ("Cloudy Potion", "Scroll of KIR"). The Apothecary unlocks the next tier of items (12-20+), at which point text-only labels stop scaling. Per the design memo, every unidentified item gains **four visual fields**:
+
+1. **Form** — bottle shape, scroll seal, rune outline. Tied to category. Identifies *type*.
+2. **Hue** — fixed palette (Cloudy / Amber / Jade / Rust / Ivory / Indigo / Ash). Identifies *this run's instance*.
+3. **Sigil** — small mark stamped on the item. Same shuffle as the hue, redundant for colourblind safety.
+4. **Name** — the existing colour-or-syllable label. Used in log lines + screen-reader output.
+
+`Identification.ts` is extended to produce `{labels, identified, form, hue, sigilFrame}` from the seeded shuffle; the inventory renderer reads all four. Pre-empts the iter-2 "Scroll of KIR" illegibility complaint *before* the item pool grows past 8.
+
+#### Examine bottom-sheet (lands with Founders)
+A generic bottom-sheet info panel for any examinable target — items, NPCs, traps, enemies, tiles. Triggered by the Examine verb on the Action Wheel (iter-3 stage 4) or by long-press on touch. Two consumers in iter 3:
+- Item examine — slot in inventory, item on floor, item in shop
+- NPC examine — Founder dialogue, shop preview, town gossip
+
+One generic component (`ui/ExamineSheet.ts`) parameterised by content. Slides up from the bottom edge, dismissable by tap-out / ESC. Solves the "where do tooltips live" question raised in the brief without requiring a separate tooltip system.
+
+#### Death summary expanded → Ledger (already shipped iter-2 stage 12)
+The four-card Ledger lands in iter-2 closeout. Iter 3 extends it with the new "what's new" entries that the Founders system enables:
+- "Apothecary rescued — open in town"
+- "Apothecary L2 — Frost Potions now drop"
+- "New rune type discovered: Soul Rune"
 
 #### What the shops actually sell
 
@@ -248,9 +298,10 @@ Found weapons gain 1–3 rune sockets. Runes (already 1 in the iter-2 manifest, 
 
 ---
 
-### Iteration 4 — Classes & magic
+### Iteration 4 — Classes & magic & per-run Goals
 **Goal:** runs feel different from each other. Build variety arrives.
 
+- **Threshold Goals + Feats.** The Threshold screen (shipped iter-2 stage 12 as a one-screen world card) gains an optional Goal layer here, since Goals + Feats are the same shape — a list of objectives, scoring, reward modifiers, persistence of best results. Goals are short ("Reach floor 5", "Find the Apothecary", "Identify five items"); picking one bumps the Embers reward. Skipping is fine. Feats are long-lived ("Reach floor 5 without a melee weapon → unlock Mage"). Both consumed by the same `objectives/` data model; the UI surfaces them in the Threshold and the Ledger.
 - **Class blueprint system.** Iter 2's Wayfarer is the default; iter-4 unlocks three branching builds. Each is *data + a few overrides* on the same `Player` shape:
   - **Brigand** — high crit on full-HP enemies; starts with 2× Blinking Scroll. Plays around alpha strikes and disengages. Pairs with Leather armor.
   - **Acolyte** — cooldown-based "Mending" heal; higher perception (traps revealed sooner). Light combat, supports party / herself with status uptime.
@@ -284,12 +335,66 @@ Found weapons gain 1–3 rune sockets. Runes (already 1 in the iter-2 manifest, 
 
 - PWA manifest + service worker (offline play).
 - Touch input layer:
-  - Single-tap tile → path to it.
+  - Single-tap adjacent tile → step. Single-tap distant tile → path to it.
   - Single-tap enemy → bump-attack one step.
-  - Long-press → examine.
-  - Contextual action button (Search / Open / Eat / Pickup) docked bottom-right.
+  - Long-press → Action Wheel (already shipped iter-3 stage 4).
+  - Contextual action button docked bottom-right.
 - Responsive UI scale.
 - Optional Capacitor wrapper for app stores once the web version is solid.
+
+---
+
+### Iteration 7 — World expansion
+**Goal:** Tallowmark stops being *"a town and a dungeon"* and becomes *"a world worth exploring"*. The metaprogression spine grows to support the long arc the design vision promises.
+
+#### Town Renown — the meta-progression spine
+The town has a numeric **Renown** level (0–10) driven by total Embers earned, Founders rescued, dungeons completed, and Feats unlocked. Each Renown tier unlocks something *visible in town*. Renown is not a stat to optimise — it's the diegetic counter that tracks player investment.
+
+| Renown | Unlocks (in addition to all prior) |
+|---|---|
+| 0 | The 4 starting buildings + main dungeon entrance (current iter-3 baseline) |
+| 1 | First wandering NPC visits town periodically |
+| 2 | **Walled garden** behind the Inn opens — quest-NPC stand position, ambient |
+| 3 | **Second dungeon entrance** appears on the town map — the Sunken Mines |
+| 4 | **Catacombs** under the cemetery unlock — third dungeon, undead-themed |
+| 5 | **Wizard's Tower** opens in the corner — new building, new Founder slot |
+| 6 | Day/night cycle activates; certain NPCs only present in certain phases |
+| 7 | **A second settlement** appears on a world map (zoomed-out view) |
+| 8 | Festival system unlocks — periodic events change loot pool / shop prices |
+| 9 | **The Glass Halls** — fourth dungeon, illusion enemies, mirror puzzles |
+| 10 | Endgame area unlocks |
+
+#### Multiple dungeons
+Each new dungeon entrance is a distinct biome / item pool / enemy mix / Founder. They share the same tile-engine and run-loop, but feel like different games on the inside.
+
+| Dungeon | Theme | Founder | Key item type | Notes |
+|---|---|---|---|---|
+| The Caves (default) | Organic stone | Apothecary / Blacksmith / Runemaster (iter 3) | Standard manifest | Iter-3 baseline |
+| The Sunken Mines | Water hazards, ore veins | Engineer (gear sockets, traps) | Gold / pickaxes | Renown 3 |
+| The Catacombs | Crypts, undead | Necromancer (bone armor, raise) | Bone / consecrated water | Renown 4 |
+| The Glass Halls | Mirrors, illusions | Seer (foresight, scrying) | Glass shards / mirrors | Renown 9 |
+
+Each has its own seed family — a "Sunken Mines run" is meaningfully distinct from a "Caves run" and has its own depth track.
+
+#### Secret areas in town
+Hidden content gated behind:
+- **Locked doors** that open after specific Feats (the Apothecary's storeroom, after Identify-100-items)
+- **Bricked-up walls** broken by item interactions (the Apothecary's "Salt of Dissolution" reveals a passage)
+- **Time-of-day gates** (a door that only opens at night, once the Renown-6 day/night cycle is live)
+- **NPC-trust gates** (a back room only opens after befriending an NPC across runs)
+
+The visual language for "locked but visible" content needs to be coherent — boarded? misty? colour-drained? See the design brief.
+
+#### Festivals + events (Renown 8+)
+Periodic in-game events change the town for a window:
+- **Market Day** — shop prices reduced, special wares.
+- **Founders' Festival** — extra dialogue, free L1 upgrades.
+- **Eclipse** — the Catacombs activate special enemies for one run.
+
+#### World map (Renown 7+)
+Once the second settlement appears, a zoomed-out world-map view shows Tallowmark + the second settlement + dungeon entrances + travel routes. Quest objectives reference world-map locations. The world map is a Phaser scene; clicking a location enters it.
+
+> **Why iter 7, not earlier:** Multiple dungeons require iter-5's biome system to be mature. Secret areas require iter-3 Founders + iter-4 Feats to be live so there's something to gate on. The Renown spine is itself the metaprogression skeleton — building it before the metaprogression *content* exists would be content-less scaffolding. **The iter-3 town authoring pattern (Tiled multi-tier exteriors, generic interior layout) was deliberately picked to support this expansion: adding a new building or new dungeon entrance to the town is a Tiled edit + a new scene file, not a TownScene rewrite.**
 
 ---
 
