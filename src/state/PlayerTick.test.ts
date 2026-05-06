@@ -31,7 +31,7 @@ describe('tickHunger', () => {
     const before = r.player.hp;
     const evs = tickHunger(r);
     expect(r.player.hp).toBe(before - 1);
-    expect(evs.find((e) => e.kind === 'starvationDamage')?.damage).toBe(1);
+    expect(evs.find((e) => e.kind === 'starvationDamage')?.amount).toBe(1);
   });
 
   it('does not damage on every turn at 0 food', () => {

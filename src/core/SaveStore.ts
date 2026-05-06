@@ -129,8 +129,7 @@ export class SaveStore {
           : { labels: {}, identified: [] },
       activeStatuses: Array.isArray(r.activeStatuses)
         ? r.activeStatuses.filter(
-            (s): s is { id: string; turnsRemaining: number } =>
-              !!s && typeof s.id === 'string' && typeof s.turnsRemaining === 'number',
+            (s) => !!s && typeof s.id === 'string' && typeof s.turnsRemaining === 'number',
           )
         : [],
     } as RunState;

@@ -8,6 +8,7 @@
 
 import type { Point } from '@/core/Grid';
 import type { Identifications } from '@/items/Identification';
+import type { StatusId } from './StatusCatalog';
 
 export const RUN_SCHEMA_VERSION = 2;
 
@@ -25,12 +26,12 @@ export interface InventorySlotData {
 }
 
 /**
- * Lightweight active-status entry on the player. The full StatusEffect framework
- * lands in stage 7; this minimal shape is enough for stage 6's Fortitude
- * (+armor) and Poisoned (HP/turn) potions.
+ * Active-status instance. JSON-serialisable; the runtime behaviour
+ * (tick fn, armor bonus, icon frame) lives on `StatusDef` in
+ * `state/StatusCatalog.ts` and is looked up by `id`.
  */
 export interface ActiveStatus {
-  id: string;
+  id: StatusId;
   turnsRemaining: number;
 }
 

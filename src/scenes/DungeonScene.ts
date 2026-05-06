@@ -40,6 +40,8 @@ import {
   tickStatuses,
   type TickEvent,
 } from '@/state/PlayerTick';
+import { hasStatus, tickStatusList } from '@/state/StatusBag';
+import { STATUS_CATALOG, type StatusTarget } from '@/state/StatusCatalog';
 
 interface DungeonSceneData {
   fresh?: boolean;
@@ -110,7 +112,8 @@ export class DungeonScene extends Phaser.Scene {
   private hpBar!: HpBar;
   private hungerBar!: HungerBar;
   private hungerText!: Phaser.GameObjects.Text;
-  private statusText!: Phaser.GameObjects.Text;
+  /** Container holding the status-icon row; rebuilt each refreshHud(). */
+  private statusIconLayer!: Phaser.GameObjects.Container;
 
   /** Item entities on the floor — `pos` mirrors data, sprite mirrors render. */
   private items: Array<ItemPlacement & { sprite?: Phaser.GameObjects.Image }> = [];
@@ -513,16 +516,11 @@ export class DungeonScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(1000);
 
-    // Status row — minimal stage-6 strip ("Fort 14  Psn 3"). Stage 7 will
-    // replace this with proper 16x16 icons.
-    this.statusText = this.add
-      .text(220, 36, '', {
-        fontFamily: 'monospace',
-        fontSize: '11px',
-        color: '#d4a24c',
-        ...stroke,
-      })
-      .setOrigin(0, 0)
+    // Status icon row — 16×16 sprites tinted by their StatusDef colour, each
+    // with a small remaining-turns countdown. Container is repopulated in
+    // refreshHud() so we don't leak nodes when statuses come and go.
+    this.statusIconLayer = this.add
+      .container(220, 38)
       .setScrollFactor(0)
       .setDepth(1000);
 
@@ -696,9 +694,37 @@ export class DungeonScene extends Phaser.Scene {
     const hungerLabel =
       this.runState.food === 0 ? 'STARVING' : this.runState.food < STARVATION_THRESHOLD ? 'Hungry' : 'Fed';
     this.hungerText.setText(`Food ${this.runState.food}/${this.runState.foodMax}  ${hungerLabel}`);
-    const statusBits = this.runState.activeStatuses.map((s) => `${s.id} ${s.turnsRemaining}`);
-    this.statusText.setText(statusBits.join('  '));
+    this.refreshStatusIcons();
     this.floorText.setText(`Floor ${this.runState.floor}    Turn ${this.runState.turn}`);
+  }
+
+  /** Rebuild the status-icon row in the HUD. Icons tinted by status colour. */
+  private refreshStatusIcons(): void {
+    this.statusIconLayer.removeAll(true);
+    const ICON = 18;
+    const STRIDE = 36;
+    let i = 0;
+    for (const s of this.runState.activeStatuses) {
+      const def = STATUS_CATALOG[s.id];
+      if (!def) continue;
+      const x = i * STRIDE;
+      const icon = this.add
+        .image(x, 0, ASSET_KEYS.sprites.rpg, def.iconFrame)
+        .setOrigin(0, 0.5)
+        .setScale(ICON / 16)
+        .setTint(parseInt(def.color.slice(1), 16));
+      const countdown = this.add
+        .text(x + ICON + 4, 0, `${def.label}${s.turnsRemaining}`, {
+          fontFamily: 'monospace',
+          fontSize: '10px',
+          color: def.color,
+          stroke: '#1a1a24',
+          strokeThickness: 2,
+        })
+        .setOrigin(0, 0.5);
+      this.statusIconLayer.add([icon, countdown]);
+      i++;
+    }
   }
 
   /**
@@ -881,6 +907,13 @@ export class DungeonScene extends Phaser.Scene {
     }
     this.autoPath = [];
     this.destinationMarker.setVisible(false);
+    // Confused mirrors keyboard movement direction. Click-to-path bypasses
+    // this on purpose — a player navigating with the mouse would otherwise
+    // be unable to move while confused. Keyboard movers feel the cost.
+    if (hasStatus(this.runState.activeStatuses, 'confused')) {
+      dx = -dx;
+      dy = -dy;
+    }
     this.tryStep({ x: this.player.pos.x + dx, y: this.player.pos.y + dy });
   }
 
@@ -1124,15 +1157,68 @@ export class DungeonScene extends Phaser.Scene {
         this.log('You are starving!', 'danger');
         this.bus.emit({
           kind: 'floatingText',
-          spec: { tile: { ...this.player.pos }, text: '-1', color: FT_COLOR_DAMAGE, size: 'small' },
+          spec: { tile: { ...this.player.pos }, text: `-${ev.amount ?? 1}`, color: FT_COLOR_DAMAGE, size: 'small' },
         });
       } else if (ev.kind === 'poisonDamage') {
         this.bus.emit({
           kind: 'floatingText',
-          spec: { tile: { ...this.player.pos }, text: '-1', color: '#7ac74c', size: 'small' },
+          spec: { tile: { ...this.player.pos }, text: `-${ev.amount ?? 1}`, color: '#7ac74c', size: 'small' },
+        });
+      } else if (ev.kind === 'bleedDamage') {
+        this.bus.emit({
+          kind: 'floatingText',
+          spec: { tile: { ...this.player.pos }, text: `-${ev.amount ?? 1}`, color: '#d44a4a', size: 'small' },
+        });
+      } else if (ev.kind === 'regenHeal') {
+        this.bus.emit({
+          kind: 'floatingText',
+          spec: { tile: { ...this.player.pos }, text: `+${ev.amount ?? 1}`, color: '#6aa84a', size: 'small' },
         });
       } else if (ev.kind === 'statusExpired') {
-        this.log(`Status faded: ${ev.statusId}.`, 'neutral');
+        const def = ev.statusId ? STATUS_CATALOG[ev.statusId] : undefined;
+        this.log(`Status faded: ${def?.label ?? ev.statusId}.`, 'neutral');
+      }
+    }
+
+    this.runEnemyStatusTicks();
+  }
+
+  /** Tick each living enemy's status bag. Mirrors player tick behaviour. */
+  private runEnemyStatusTicks(): void {
+    for (const enemy of this.enemies) {
+      if (!enemy.alive || enemy.statuses.length === 0) continue;
+      const target: StatusTarget = {
+        damage: (n) => {
+          const dealt = Math.min(n, enemy.stats.hp);
+          enemy.stats.hp -= dealt;
+          return dealt;
+        },
+        heal: (n) => {
+          const headroom = enemy.stats.hpMax - enemy.stats.hp;
+          const healed = Math.min(n, Math.max(0, headroom));
+          enemy.stats.hp += healed;
+          return healed;
+        },
+        isDead: () => enemy.stats.hp <= 0,
+      };
+      const events = tickStatusList(enemy.statuses, target);
+      for (const e of events) {
+        if (e.kind === 'damage' && e.amount) {
+          this.bus.emit({
+            kind: 'floatingText',
+            spec: {
+              tile: { ...enemy.pos },
+              text: `-${e.amount}`,
+              color: e.statusId === 'poisoned' ? '#7ac74c' : '#d44a4a',
+              size: 'small',
+            },
+          });
+        }
+      }
+      if (enemy.stats.hp <= 0 && enemy.alive) {
+        enemy.alive = false;
+        this.runState.kills += 1;
+        this.log(`The ${enemy.displayName} succumbs.`, 'recovery');
       }
     }
   }

@@ -1,4 +1,5 @@
 import type { Point } from '@/core/Grid';
+import type { ActiveStatus } from '@/state/RunState';
 import { Entity, type CombatStats } from './Entity';
 
 export interface EnemyAi {
@@ -15,6 +16,14 @@ export interface EnemyAiContext {
 }
 
 export class Enemy extends Entity {
+  /**
+   * Active statuses on this enemy (poisoned, bleed, etc.). Populated when
+   * the player applies a status via combat (e.g. a Poison-rune weapon)
+   * or a thrown potion. Ticks happen on the world tick alongside player
+   * statuses; `DungeonScene.runEnemyTurns` ticks each enemy's bag.
+   */
+  public statuses: ActiveStatus[] = [];
+
   constructor(
     pos: Point,
     stats: CombatStats,

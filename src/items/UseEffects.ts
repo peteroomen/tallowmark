@@ -49,9 +49,13 @@ export function useItem(state: RunState, slotIndex: number, rng: { next: () => n
   const intents: UseIntent[] = [];
   switch (def.id) {
     case 'potion_healing': {
-      const amount = Math.floor(state.player.hpMax * 0.25);
-      intents.push({ kind: 'heal', amount });
-      intents.push({ kind: 'log', message: `You drink the ${def.trueName}. +${amount} HP.` });
+      // S7: Healing applies a 1 HP/turn regen status for 10 turns rather than
+      // an instant heal. Encourages drinking pre-fight rather than emergency
+      // mid-fight, and gives the new status framework a positive effect to
+      // surface in the HUD icon row.
+      applyStatus(state, 'healing', 10);
+      intents.push({ kind: 'applyStatus', statusId: 'healing', turns: 10 });
+      intents.push({ kind: 'log', message: `You feel a slow warmth. Regen 1 HP/turn for 10 turns.` });
       return { intents, consumed: true };
     }
     case 'potion_fortitude': {

@@ -13,12 +13,13 @@ const setup = () => {
 };
 
 describe('useItem', () => {
-  it('healing potion emits a heal intent and identifies the def', () => {
+  it('healing potion applies the regen status and identifies the def', () => {
     const s = setup();
     s.inventory.push({ defId: 'potion_healing', count: 1 });
     const r = useItem(s, 0, rng);
     expect(r.consumed).toBe(true);
-    expect(r.intents.find((i) => i.kind === 'heal')).toBeTruthy();
+    expect(s.activeStatuses.find((st) => st.id === 'healing')).toBeTruthy();
+    expect(r.intents.find((i) => i.kind === 'applyStatus' && i.statusId === 'healing')).toBeTruthy();
     expect(s.identifications.identified).toContain('potion_healing');
   });
 
