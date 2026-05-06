@@ -14,16 +14,38 @@ export class PauseScene extends Phaser.Scene {
       scene: this,
       x: GAME_WIDTH / 2,
       y: GAME_HEIGHT / 2,
-      width: 360,
-      height: 240,
+      width: 400,
+      height: 360,
       title: 'PAUSED',
       variant: 'slate',
     });
 
+    // Controls reference — pause is the single place a player can look up
+    // every binding. Replaces the per-screen footer hints (which only show
+    // 1-2 keys) for the moments when the player is genuinely lost.
+    const controlsLines = [
+      'WASD / arrows / hjkl  — move',
+      'yubn                  — diagonals',
+      '.  / numpad 5         — wait one turn',
+      'click tile             — auto-path',
+      'click enemy            — bump-attack',
+      'I  — inventory     C  — character',
+      'F8 — town editor   F9 — sprite sheet',
+    ];
+    this.add
+      .text(GAME_WIDTH / 2, GAME_HEIGHT / 2 - 120, controlsLines.join('\n'), {
+        fontFamily: 'monospace',
+        fontSize: '11px',
+        color: '#cfcfd5',
+        align: 'left',
+        lineSpacing: 4,
+      })
+      .setOrigin(0.5, 0);
+
     new KenneyButton({
       scene: this,
       x: GAME_WIDTH / 2,
-      y: GAME_HEIGHT / 2 - 16,
+      y: GAME_HEIGHT / 2 + 70,
       text: 'Resume',
       primary: true,
       onClick: () => this.resume(),
@@ -32,7 +54,7 @@ export class PauseScene extends Phaser.Scene {
     new KenneyButton({
       scene: this,
       x: GAME_WIDTH / 2,
-      y: GAME_HEIGHT / 2 + 36,
+      y: GAME_HEIGHT / 2 + 122,
       text: 'Abandon Run',
       variant: 'destructive',
       onClick: () =>

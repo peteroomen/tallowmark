@@ -114,6 +114,9 @@ export class DungeonScene extends Phaser.Scene {
 
   /** Item entities on the floor — `pos` mirrors data, sprite mirrors render. */
   private items: Array<ItemPlacement & { sprite?: Phaser.GameObjects.Image }> = [];
+
+  /** Window-level keydown handler (QA workaround for physical '.' key). */
+  private windowKeyHandler?: (e: KeyboardEvent) => void;
   /** Game event bus — combat / status / item code emits, UI subscribes. */
   private bus = new GameEventBus();
 
@@ -141,6 +144,10 @@ export class DungeonScene extends Phaser.Scene {
     services.audio.playMusic('dungeon');
 
     // Scenes are reused — reset transient state.
+    if (this.windowKeyHandler) {
+      window.removeEventListener('keydown', this.windowKeyHandler);
+      this.windowKeyHandler = undefined;
+    }
     this.deathSequenceStarted = false;
     this.deathElapsedMs = 0;
     this.deathTransitionFired = false;
@@ -217,6 +224,36 @@ export class DungeonScene extends Phaser.Scene {
       });
     }
 
+    // Last-resort window listener — QA found that physical '.' keypresses
+    // weren't reaching Phaser's keyboard plugin in some browsers (canvas-
+    // focus capture issue), even though programmatic document.dispatchEvent
+    // worked. Binding directly to window catches the keydown before any
+    // Phaser focus filtering. Stored on `this` so we can detach on shutdown.
+    this.windowKeyHandler = (e: KeyboardEvent) => {
+      if (!this.player.alive) return;
+      if (this.scene.isPaused()) return;
+      const k = (e.key ?? '').toLowerCase();
+      const c = e.code ?? '';
+      if (
+        k === '.' ||
+        k === 'period' ||
+        k === 'decimal' ||
+        k === 'numpaddecimal' ||
+        c === 'Period' ||
+        c === 'NumpadDecimal'
+      ) {
+        e.preventDefault();
+        this.tryStep(this.player.pos);
+      }
+    };
+    window.addEventListener('keydown', this.windowKeyHandler);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      if (this.windowKeyHandler) {
+        window.removeEventListener('keydown', this.windowKeyHandler);
+        this.windowKeyHandler = undefined;
+      }
+    });
+
     // Subscribe to the event bus before anything emits. UI translations
     // live here: 'log' events append a tone-coloured line; 'floatingText'
     // events spawn an ephemeral bouncer at the tile.
@@ -239,9 +276,12 @@ export class DungeonScene extends Phaser.Scene {
 
     services.save.saveRun(this.runState);
     if (!data.resume) {
-      this.log(`You enter the dungeon. Seed: ${this.runState.seed}.`);
+      this.log('Stale air, distant scratching.', 'story');
+      this.log(`Floor ${this.runState.floor}. Seed ${this.runState.seed}.`, 'discovery');
+      this.log('Watch for traps. Eat when you can.', 'neutral');
     } else {
-      this.log(`You resume your descent.`);
+      this.log('You resume your descent.', 'neutral');
+      this.log(`Floor ${this.runState.floor}, turn ${this.runState.turn}.`, 'discovery');
     }
 
     // Dev hook for tests / AI agents — exposes a way to trigger game events
@@ -970,7 +1010,7 @@ export class DungeonScene extends Phaser.Scene {
   private playerAttack(enemy: Enemy): void {
     this.lungeAt(this.playerSprite, enemy.pos);
     const result = this.combat.applyDamage(enemy.stats, this.combat.resolveAttack(this.player.stats, enemy.stats));
-    this.log(`You hit the ${enemy.displayName} for ${result.damage}.`, 'neutral');
+    this.log(`You hit the ${enemy.displayName} for ${result.damage}.`, 'danger');
     this.bus.emit({
       kind: 'floatingText',
       spec: { tile: { ...enemy.pos }, text: `-${result.damage}`, color: FT_COLOR_DAMAGE },
@@ -979,6 +1019,12 @@ export class DungeonScene extends Phaser.Scene {
       enemy.alive = false;
       this.runState.kills += 1;
       this.log(`The ${enemy.displayName} dies.`, 'recovery');
+      // Green "+kill" bouncer above the death tile so the green log line gets
+      // a paired floating-text echo. Mirrors the red "-N" bouncer on hits.
+      this.bus.emit({
+        kind: 'floatingText',
+        spec: { tile: { ...enemy.pos }, text: '+kill', color: '#6aa84a', size: 'small' },
+      });
     }
   }
 
