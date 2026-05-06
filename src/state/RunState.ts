@@ -24,6 +24,14 @@ export interface RunState {
   turn: number;
   /** Total enemies killed across this run, persisted across save/load. */
   kills: number;
+  /**
+   * Tiles the player has ever seen on the current floor — "x,y" string keys.
+   * Persists across save/load. Used by the fog-of-war renderer in Stage 4.
+   *
+   * Stored as a string[] for JSON serialisation; rehydrated to a Set inside
+   * the renderer on load.
+   */
+  exploredTiles: string[];
   playerPos: Point;
   player: PlayerStats;
   /** Set when the run has ended; UIs check this to route to the death summary. */
@@ -37,6 +45,7 @@ export function newRunState(seed: number, startPos: Point): RunState {
     floor: 1,
     turn: 0,
     kills: 0,
+    exploredTiles: [],
     playerPos: { x: startPos.x, y: startPos.y },
     player: { hp: 20, hpMax: 20, power: 4, armor: 1 },
     ended: null,

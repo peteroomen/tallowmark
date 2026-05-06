@@ -99,7 +99,11 @@ export class SaveStore {
     const r = input as Partial<RunState>;
     if (r.schemaVersion !== RUN_SCHEMA_VERSION) return null;
     // Default newly-added fields so older in-flight saves load cleanly.
-    return { ...r, kills: r.kills ?? 0 } as RunState;
+    return {
+      ...r,
+      kills: r.kills ?? 0,
+      exploredTiles: Array.isArray(r.exploredTiles) ? r.exploredTiles : [],
+    } as RunState;
   }
 }
 

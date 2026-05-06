@@ -21,6 +21,8 @@ import { TileKind, TILES } from '@/world/Tile';
 import { CharsSheet, Inputs, UiLarge } from '@/world/FrameCatalog';
 import { KenneyPlank } from '@/ui/KenneyPlank';
 import { HpBar } from '@/ui/HpBar';
+import { FogMask, fogKey } from '@/ui/FogMask';
+import { computeFov } from '@/core/Fov';
 import { findPath, findPathToBump } from '@/core/Pathfinding';
 import { chebyshev, type Point } from '@/core/Grid';
 import { newRunState, type RunState } from '@/state/RunState';
@@ -35,6 +37,15 @@ const PLAYER_FRAME = CharsSheet.player;
 const ENEMY_FRAME = CharsSheet.goblin;
 const STEP_TWEEN_MS = 130;
 const AUTO_STEP_INTERVAL_MS = 150; // > STEP_TWEEN_MS so steps don't pile up mid-animation
+
+/**
+ * Sight radius for fog-of-war shadowcasting. Stage 4 SCAFFOLD value: 999 —
+ * effectively unlimited, so every tile is in the visible set and the FogMask
+ * draws nothing. The data flow (compute FoV → update exploredTiles → save →
+ * update mask) is fully wired; flipping this to 8 or so in the next stage
+ * turns the visual fog on without any other code changes.
+ */
+const SIGHT_RADIUS = 999;
 
 /**
  * Helper: world pixel coords of a tile's center.
@@ -67,6 +78,10 @@ export class DungeonScene extends Phaser.Scene {
   private autoStepTimer = 0;
   /** True once the death sequence has been started; used to avoid double-firing. */
   private deathSequenceStarted = false;
+
+  // Fog of war (Stage 4 scaffold)
+  private fogMask?: FogMask;
+  private exploredTiles = new Set<string>();
 
   constructor() {
     super(SCENE_KEYS.Dungeon);
@@ -107,6 +122,16 @@ export class DungeonScene extends Phaser.Scene {
     this.drawActors();
     this.drawHud();
     this.setupCamera();
+
+    // Fog of war scaffold: rehydrate explored set, build the mask, do an
+    // initial FoV compute so the player can see immediately on entry.
+    this.exploredTiles = new Set(this.runState.exploredTiles);
+    this.fogMask = new FogMask({
+      scene: this,
+      cols: this.dungeon.tiles.width,
+      rows: this.dungeon.tiles.height,
+    });
+    this.recomputeFov();
 
     this.turnEngine.onWorldTick(() => this.runEnemyTurns());
 
@@ -680,11 +705,27 @@ export class DungeonScene extends Phaser.Scene {
     });
     this.cleanupDeadEnemies();
     this.runState.player = { ...this.player.stats };
+    this.recomputeFov();
+    // exploredTiles is updated inside recomputeFov; persist it on the run.
+    this.runState.exploredTiles = Array.from(this.exploredTiles);
     getServices(this).save.saveRun(this.runState);
     this.refreshHud();
     if (!this.player.alive) {
       this.handlePlayerDeath();
     }
+  }
+
+  /** Compute current FoV from the player's position and update the FogMask. */
+  private recomputeFov(): void {
+    const isOpaque = (x: number, y: number): boolean => {
+      if (!this.dungeon.tiles.inBounds(x, y)) return true;
+      return TILES[this.dungeon.tiles.get(x, y)].opaque;
+    };
+    const visible = computeFov(this.player.pos, SIGHT_RADIUS, isOpaque);
+    // Merge into explored.
+    for (const key of visible) this.exploredTiles.add(key);
+    if (this.fogMask) this.fogMask.update(visible, this.exploredTiles);
+    void fogKey; // imported for future use; suppress unused-import
   }
 
   private playerAttack(enemy: Enemy): void {
