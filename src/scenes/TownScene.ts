@@ -29,6 +29,12 @@ const TOWN_W = Math.floor(GAME_WIDTH / TILE_SIZE);
 const TOWN_H = Math.floor(GAME_HEIGHT / TILE_SIZE);
 const STEP_TWEEN_MS = 130;
 const TERRAIN_LAYER = 'terrain';
+const OVERLAY_LAYER = 'overlay';
+
+const LAYER_DEPTHS: Record<string, number> = {
+  [TERRAIN_LAYER]: 0,
+  [OVERLAY_LAYER]: 5,
+};
 
 interface Building {
   x: number;
@@ -67,15 +73,17 @@ export class TownScene extends Phaser.Scene {
   // Map data + editor.
   private mapData!: MapData;
   private editor!: MapEditor;
-  private terrainSprites: Array<Array<Phaser.GameObjects.Image | undefined>> = [];
+  /** Per-layer 2D arrays of sprite refs so we can re-render single tiles. */
+  private layerSprites: Record<string, Array<Array<Phaser.GameObjects.Image | undefined>>> = {};
 
   // Edit mode state.
   private editing = false;
   private editorUi?: Phaser.GameObjects.Container;
   private hoverHighlight?: Phaser.GameObjects.Rectangle;
   private selectedFrame: number = TilesRPG.grass;
+  private selectedLayer: string = TERRAIN_LAYER;
   private painting = false;
-  private currentStrokeCells: Array<{ x: number; y: number; before: number; after: number }> = [];
+  private currentStrokeCells: Array<{ x: number; y: number; before: number; after: number; layer: string }> = [];
   private editStatusText?: Phaser.GameObjects.Text;
 
   constructor() {
@@ -86,8 +94,10 @@ export class TownScene extends Phaser.Scene {
     const services = getServices(this);
     services.audio.playMusic('town');
 
-    // Load saved map → fall back to procedural default.
+    // Load saved map → fall back to procedural default. Older saved maps
+    // were single-layer; ensureLayers() backfills the overlay layer.
     this.mapData = loadMapFromLocal(TOWN_MAP_KEY) ?? this.buildDefaultMap();
+    this.ensureLayers(this.mapData);
     this.editor = new MapEditor(this.mapData);
 
     this.drawTerrain();
@@ -115,53 +125,89 @@ export class TownScene extends Phaser.Scene {
       tileHeight: TILE_SIZE_SOURCE,
       tileset: 'rpg',
     });
-    const layer = requireLayer(map, TERRAIN_LAYER);
+    // Terrain layer — base ground. Defaults to grass everywhere.
+    const terrain = requireLayer(map, TERRAIN_LAYER);
     for (let y = 0; y < TOWN_H; y++) {
-      for (let x = 0; x < TOWN_W; x++) setTile(layer, x, y, TilesRPG.grass);
+      for (let x = 0; x < TOWN_W; x++) setTile(terrain, x, y, TilesRPG.grass);
     }
-    // Horizontal stone path across the middle.
-    for (let x = 0; x < TOWN_W; x++) setTile(layer, x, 8, TilesRPG.dirt);
-    // Vertical spur down to the dungeon arch.
+    for (let x = 0; x < TOWN_W; x++) setTile(terrain, x, 8, TilesRPG.dirt);
     for (let y = 8; y < DUNGEON_ENTRANCE.y; y++) {
-      setTile(layer, DUNGEON_ENTRANCE.x + 1, y, TilesRPG.dirt);
+      setTile(terrain, DUNGEON_ENTRANCE.x + 1, y, TilesRPG.dirt);
     }
+
+    // Overlay layer — decorations sit on top of terrain. Default empty.
+    map.layers.push({
+      name: OVERLAY_LAYER,
+      width: TOWN_W,
+      height: TOWN_H,
+      data: new Array(TOWN_W * TOWN_H).fill(EMPTY_TILE),
+    });
     return map;
   }
 
+  /** Ensure the loaded map has both layers — older saved maps won't have overlay. */
+  private ensureLayers(map: MapData): void {
+    if (!map.layers.find((l) => l.name === OVERLAY_LAYER)) {
+      map.layers.push({
+        name: OVERLAY_LAYER,
+        width: map.width,
+        height: map.height,
+        data: new Array(map.width * map.height).fill(EMPTY_TILE),
+      });
+    }
+  }
+
   private drawTerrain(): void {
-    const layer = requireLayer(this.mapData, TERRAIN_LAYER);
-    this.terrainSprites = Array.from({ length: layer.height }, () => new Array(layer.width));
-    for (let y = 0; y < layer.height; y++) {
-      for (let x = 0; x < layer.width; x++) {
-        const frame = layer.data[y * layer.width + x] ?? EMPTY_TILE;
-        if (frame === EMPTY_TILE) continue;
-        this.terrainSprites[y]![x] = this.add
-          .image(
-            x * TILE_SIZE + TILE_SIZE / 2,
-            y * TILE_SIZE + TILE_SIZE / 2,
-            ASSET_KEYS.sprites.rpg,
-            frame,
-          )
-          .setScale(RENDER_SCALE);
+    // Render each layer in declaration order so overlay sprites composite on
+    // top of terrain. setDepth on each sprite gives Phaser an explicit
+    // z-order in case unrelated GameObjects (HUD, decorations from
+    // drawDecorations) get rendered between layers.
+    for (const layer of this.mapData.layers) {
+      const grid: Array<Array<Phaser.GameObjects.Image | undefined>> = Array.from(
+        { length: layer.height },
+        () => new Array(layer.width),
+      );
+      this.layerSprites[layer.name] = grid;
+      const depth = LAYER_DEPTHS[layer.name] ?? 0;
+      for (let y = 0; y < layer.height; y++) {
+        for (let x = 0; x < layer.width; x++) {
+          const frame = layer.data[y * layer.width + x] ?? EMPTY_TILE;
+          if (frame === EMPTY_TILE) continue;
+          grid[y]![x] = this.add
+            .image(
+              x * TILE_SIZE + TILE_SIZE / 2,
+              y * TILE_SIZE + TILE_SIZE / 2,
+              ASSET_KEYS.sprites.rpg,
+              frame,
+            )
+            .setScale(RENDER_SCALE)
+            .setDepth(depth);
+        }
       }
     }
   }
 
-  /** Replace the visual at (x, y) to match the data layer. Called after edits. */
-  private rerenderTile(x: number, y: number): void {
-    const old = this.terrainSprites[y]?.[x];
+  /**
+   * Replace the visual at (layer, x, y) to match the data layer. Called
+   * after a paint edit. Sprites are tracked per-layer so painting the
+   * overlay doesn't disturb the terrain underneath.
+   */
+  private rerenderTile(layerName: string, x: number, y: number): void {
+    const grid = this.layerSprites[layerName];
+    if (!grid) return;
+    const old = grid[y]?.[x];
     if (old) old.destroy();
-    const layer = requireLayer(this.mapData, TERRAIN_LAYER);
+    const layer = requireLayer(this.mapData, layerName);
     const frame = layer.data[y * layer.width + x] ?? EMPTY_TILE;
     if (frame === EMPTY_TILE) {
-      if (this.terrainSprites[y]) this.terrainSprites[y]![x] = undefined;
+      if (grid[y]) grid[y]![x] = undefined;
       return;
     }
-    if (!this.terrainSprites[y]) this.terrainSprites[y] = [];
-    this.terrainSprites[y]![x] = this.add
+    if (!grid[y]) grid[y] = [];
+    grid[y]![x] = this.add
       .image(x * TILE_SIZE + TILE_SIZE / 2, y * TILE_SIZE + TILE_SIZE / 2, ASSET_KEYS.sprites.rpg, frame)
       .setScale(RENDER_SCALE)
-      .setDepth(0);
+      .setDepth(LAYER_DEPTHS[layerName] ?? 0);
   }
 
   // ---------- Procedural overlays (lake, buildings, dungeon arch) ----------
@@ -657,6 +703,7 @@ export class TownScene extends Phaser.Scene {
         .setInteractive({ useHandCursor: true });
       zone.on('pointerup', () => {
         this.selectedFrame = entry.frame;
+        this.selectedLayer = entry.layer;
         this.refreshEditorUi();
       });
       container.add([slice, sprite, label, zone]);
@@ -686,7 +733,7 @@ export class TownScene extends Phaser.Scene {
     const undo = this.editor.canUndo() ? '↶' : ' ';
     const redo = this.editor.canRedo() ? '↷' : ' ';
     this.editStatusText.setText(
-      `[${action}] depth ${this.editor.undoDepth()} ${undo}${redo}\nF8 exit · Z undo · ⇧Z redo · S save · E export · RMB erase`,
+      `[${action}] depth ${this.editor.undoDepth()} ${undo}${redo}\nlayer: ${this.selectedLayer}\nF8 exit · Z undo · ⇧Z redo · S save · E export · RMB erase`,
     );
   }
 
@@ -706,40 +753,54 @@ export class TownScene extends Phaser.Scene {
   }
 
   private paintCell(tx: number, ty: number, frame: number): void {
-    const layer: MapLayer = requireLayer(this.mapData, TERRAIN_LAYER);
+    // Right-click erases the OVERLAY layer first if there's something there,
+    // otherwise resets terrain. Painting writes to the layer that matches
+    // the currently-selected palette entry.
+    const layerName = frame === EMPTY_TILE ? this.eraseLayerAt(tx, ty) : this.selectedLayer;
+    const layer: MapLayer = requireLayer(this.mapData, layerName);
     const before = layer.data[ty * layer.width + tx] ?? EMPTY_TILE;
-    if (before === frame) return; // no-op
-    // Skip if this cell already painted in the active stroke.
-    if (this.currentStrokeCells.some((c) => c.x === tx && c.y === ty)) return;
-    this.currentStrokeCells.push({ x: tx, y: ty, before, after: frame });
-    // Apply locally to keep the visual fresh during the stroke; the final
-    // committed action will be a 'stroke' for one-click undo.
+    if (before === frame) return;
+    if (this.currentStrokeCells.some((c) => c.x === tx && c.y === ty && c.layer === layerName)) return;
+    this.currentStrokeCells.push({ x: tx, y: ty, before, after: frame, layer: layerName });
     setTile(layer, tx, ty, frame);
-    this.rerenderTile(tx, ty);
+    this.rerenderTile(layerName, tx, ty);
+  }
+
+  /** Right-click decides which layer to clear: overlay wins if non-empty. */
+  private eraseLayerAt(tx: number, ty: number): string {
+    const overlay = requireLayer(this.mapData, OVERLAY_LAYER);
+    if ((overlay.data[ty * overlay.width + tx] ?? EMPTY_TILE) !== EMPTY_TILE) return OVERLAY_LAYER;
+    return TERRAIN_LAYER;
   }
 
   private commitStroke(): void {
     this.painting = false;
     if (this.currentStrokeCells.length === 0) return;
-    if (this.currentStrokeCells.length === 1) {
-      // Single-cell strokes log as a paint action so the action log is tidy.
-      const c = this.currentStrokeCells[0]!;
-      // Roll back the eager local apply, then push through the editor.
-      const layer = requireLayer(this.mapData, TERRAIN_LAYER);
-      setTile(layer, c.x, c.y, c.before);
-      this.rerenderTile(c.x, c.y);
-      this.editor.apply(buildPaintAction(this.mapData, TERRAIN_LAYER, c.x, c.y, c.after));
-      this.rerenderTile(c.x, c.y);
-    } else {
-      // Roll back all eager local applies first.
-      const layer = requireLayer(this.mapData, TERRAIN_LAYER);
-      for (const c of this.currentStrokeCells) setTile(layer, c.x, c.y, c.before);
-      this.editor.apply({
-        kind: 'stroke',
-        layer: TERRAIN_LAYER,
-        cells: [...this.currentStrokeCells],
-      });
-      for (const c of this.currentStrokeCells) this.rerenderTile(c.x, c.y);
+    // Group stroke cells by layer so we can emit one stroke action per layer
+    // touched. Most strokes hit a single layer; this still handles the edge
+    // case cleanly.
+    const cellsByLayer = new Map<string, typeof this.currentStrokeCells>();
+    for (const c of this.currentStrokeCells) {
+      if (!cellsByLayer.has(c.layer)) cellsByLayer.set(c.layer, []);
+      cellsByLayer.get(c.layer)!.push(c);
+    }
+    for (const [layerName, cells] of cellsByLayer) {
+      const layer = requireLayer(this.mapData, layerName);
+      // Roll back the eager local applies for this layer's cells.
+      for (const c of cells) setTile(layer, c.x, c.y, c.before);
+      if (cells.length === 1) {
+        const c = cells[0]!;
+        this.rerenderTile(layerName, c.x, c.y);
+        this.editor.apply(buildPaintAction(this.mapData, layerName, c.x, c.y, c.after));
+        this.rerenderTile(layerName, c.x, c.y);
+      } else {
+        this.editor.apply({
+          kind: 'stroke',
+          layer: layerName,
+          cells: cells.map((c) => ({ x: c.x, y: c.y, before: c.before, after: c.after })),
+        });
+        for (const c of cells) this.rerenderTile(layerName, c.x, c.y);
+      }
     }
     this.currentStrokeCells = [];
     this.updateEditStatus('paint');
@@ -765,11 +826,17 @@ export class TownScene extends Phaser.Scene {
     this.updateEditStatus('redo');
   }
 
-  private rerenderActionCells(action: { kind: 'paint' | 'stroke'; cells?: ReadonlyArray<{ x: number; y: number }>; x?: number; y?: number }): void {
+  private rerenderActionCells(action: {
+    kind: 'paint' | 'stroke';
+    layer: string;
+    cells?: ReadonlyArray<{ x: number; y: number }>;
+    x?: number;
+    y?: number;
+  }): void {
     if (action.kind === 'paint' && typeof action.x === 'number' && typeof action.y === 'number') {
-      this.rerenderTile(action.x, action.y);
+      this.rerenderTile(action.layer, action.x, action.y);
     } else if (action.kind === 'stroke' && action.cells) {
-      for (const c of action.cells) this.rerenderTile(c.x, c.y);
+      for (const c of action.cells) this.rerenderTile(action.layer, c.x, c.y);
     }
   }
 
