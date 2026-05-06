@@ -63,17 +63,29 @@ test.describe('death loop auto-transition', () => {
     );
     expect(hookExists, 'dev hook __tallowmark.killPlayer should exist in dev build').toBe(true);
 
-    const beforeShot = await page.locator('canvas').screenshot();
+    // Sanity: we're in the dungeon before the kill.
+    const scenesBefore = await page.evaluate(
+      () => (window as { __tallowmark?: { activeScenes?: () => string[] } }).__tallowmark?.activeScenes?.() ?? [],
+    );
+    expect(scenesBefore, 'expected to be in Dungeon before kill').toContain('Dungeon');
 
-    // Trigger death directly. After the death-transition timer (600ms) the
+    // Trigger death directly. After the death-transition timer (~600ms) the
     // dungeon scene should auto-stop and DeathSummary should mount.
     await page.evaluate(() => {
       (window as { __tallowmark?: { killPlayer?: () => void } }).__tallowmark?.killPlayer?.();
     });
     await page.waitForTimeout(1_500);
 
-    const afterShot = await page.locator('canvas').screenshot();
-    expect(beforeShot.equals(afterShot), 'expected scene to auto-transition after death').toBe(false);
+    const scenesAfter = await page.evaluate(
+      () => (window as { __tallowmark?: { activeScenes?: () => string[] } }).__tallowmark?.activeScenes?.() ?? [],
+    );
+    // The strong assertion: scene actually transitioned. Pixel-only diffs
+    // were too lenient — the camera fade-to-black would change the canvas
+    // even when the underlying transition silently failed.
+    expect(scenesAfter, 'expected scene to auto-transition to DeathSummary after death').toContain(
+      'DeathSummary',
+    );
+    expect(scenesAfter, 'Dungeon should have stopped').not.toContain('Dungeon');
     expect(errors, errors.join('\n')).toEqual([]);
   });
 });

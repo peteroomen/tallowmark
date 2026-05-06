@@ -647,6 +647,12 @@ export class DungeonScene extends Phaser.Scene {
       k === '5' ||
       k === 'clear' ||
       k === 'decimal' ||
+      // The W3C key name for the period key is 'Period' — some automation
+      // tools fire e.key = 'period' (lowercase) instead of '.'. Match both
+      // string forms in addition to e.code.
+      k === 'period' ||
+      k === 'numpad5' ||
+      k === 'numpaddecimal' ||
       c === 'Period' ||
       c === 'Numpad5' ||
       c === 'NumpadDecimal'
@@ -799,13 +805,19 @@ export class DungeonScene extends Phaser.Scene {
     this.runState.ended = { reason: 'death', turn: this.runState.turn };
     getServices(this).save.saveRun(this.runState);
 
-    // Use camera fade for the death transition. Phaser's camera effects run
-    // off the camera's own update loop, which fires reliably regardless of
-    // whatever else might be happening in the scene update cycle (the QA pass
-    // showed our previous update-loop timer didn't always fire).
-    const cam = this.cameras.main;
-    cam.fadeOut(500, 0, 0, 0);
-    cam.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => this.toDeathSummary());
+    // Cosmetic camera fade — kicks off the visual blackout. The QA pass
+    // proved we *cannot* rely on the FADE_OUT_COMPLETE event firing in every
+    // environment (it didn't fire in the agent's harness), so the actual
+    // scene transition is driven by a plain setTimeout. Browser-level timer:
+    // independent of Phaser's update loop, the scene's pause state, the
+    // camera's effect queue, or any other ambient state.
+    this.cameras.main.fadeOut(500, 0, 0, 0);
+    setTimeout(() => {
+      // Guard against double-firing if the scene was already torn down.
+      if (this.scene.isActive() || this.scene.isPaused()) {
+        this.toDeathSummary();
+      }
+    }, 600);
   }
 
   private completeRunSurvived(): void {
