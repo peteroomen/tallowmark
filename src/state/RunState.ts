@@ -10,6 +10,7 @@ import type { Point } from '@/core/Grid';
 import type { Identifications } from '@/items/Identification';
 import type { StatusId } from './StatusCatalog';
 import type { TrapKind } from '@/world/Dungeon/TrapCatalog';
+import type { ClassBlueprint } from '@/entities/classes/ClassBlueprint';
 
 export const RUN_SCHEMA_VERSION = 2;
 
@@ -102,7 +103,16 @@ export function newRunState(
   seed: number,
   startPos: Point,
   identifications: Identifications = { labels: {}, identified: [] },
+  classBlueprint?: ClassBlueprint,
+  inventory?: Array<{ defId: string; count: number }>,
 ): RunState {
+  // Default to Wayfarer if no blueprint supplied — keeps newRunState callable
+  // from places that don't know about the class system (tests, save migration).
+  const bp = classBlueprint ?? {
+    baseStats: { hp: 30, hpMax: 30, power: 5, armor: 1, perception: 0.3 },
+    food: 200,
+    foodMax: 200,
+  };
   return {
     schemaVersion: RUN_SCHEMA_VERSION,
     seed,
@@ -111,12 +121,10 @@ export function newRunState(
     kills: 0,
     exploredTiles: [],
     playerPos: { x: startPos.x, y: startPos.y },
-    // HP/power bumps are deferred to stage 11 (Wayfarer class). Keep iter-2
-    // baseline so manual playtest balance is unchanged this stage.
-    player: { hp: 20, hpMax: 20, power: 4, armor: 1, perception: 0.3 },
-    food: 200,
-    foodMax: 200,
-    inventory: [{ defId: 'food_hardtack', count: 1 }],
+    player: { ...bp.baseStats },
+    food: bp.food,
+    foodMax: bp.foodMax,
+    inventory: inventory ?? [{ defId: 'food_hardtack', count: 1 }],
     identifications,
     activeStatuses: [],
     traps: [],

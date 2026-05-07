@@ -30,14 +30,19 @@ export class CharacterScene extends Phaser.Scene {
     });
 
     const run = services.save.loadRun();
-    const stats = run?.player ?? { hp: 20, hpMax: 20, power: 4, armor: 1 };
+    const stats = run?.player ?? { hp: 30, hpMax: 30, power: 5, armor: 1, perception: 0.3 };
+    const food = run?.food ?? 200;
+    const foodMax = run?.foodMax ?? 200;
+    const perceptionPct = Math.round((stats.perception ?? 0.3) * 100);
 
     const lines: ReadonlyArray<readonly [string, string]> = [
-      ['Class', 'Wanderer (placeholder)'],
+      ['Class', 'Wayfarer'],
+      ['', 'Walked here. Will walk back, if able.'],
       ['HP', `${stats.hp} / ${stats.hpMax}`],
       ['Attack Power', `${stats.power}`],
       ['Armor', `${stats.armor}`],
-      ['Hunger', '(coming iteration 2)'],
+      ['Perception', `${perceptionPct}%`],
+      ['Hunger', `${food} / ${foodMax}`],
       ['Embers (meta)', `${services.persistent.metaCurrency}`],
     ];
 

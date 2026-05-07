@@ -17,6 +17,8 @@ import { Player } from '@/entities/Player';
 import { Enemy, type EnemyAiContext } from '@/entities/Enemy';
 import { RatAi } from '@/entities/ai/RatAi';
 import { ArcherAi } from '@/entities/ai/ArcherAi';
+import { Wayfarer } from '@/entities/classes/Wayfarer';
+import { resolveStartingKit } from '@/entities/classes/ClassBlueprint';
 import { generateBspDungeon, type GeneratedDungeon } from '@/world/Dungeon/BspGenerator';
 import { TileKind, TILES } from '@/world/Tile';
 import { CharsSheet, Inputs, UiLarge } from '@/world/FrameCatalog';
@@ -199,7 +201,17 @@ export class DungeonScene extends Phaser.Scene {
     } else {
       const seed = Date.now() & 0x7fffffff;
       const seedRng = Rng.fromSeed(seed);
-      this.runState = newRunState(seed, { x: 0, y: 0 }, buildIdentifications(seedRng));
+      // Resolve the Wayfarer's starting kit using the run RNG so the
+      // "1× Hardtack + 1× random unidentified potion" pick is reproducible
+      // per seed.
+      const startingKit = resolveStartingKit(Wayfarer, seedRng);
+      this.runState = newRunState(
+        seed,
+        { x: 0, y: 0 },
+        buildIdentifications(seedRng),
+        Wayfarer,
+        startingKit,
+      );
     }
 
     // Per-floor RNG: same base seed XOR the floor number so each floor is
