@@ -28,15 +28,22 @@ export type LogTone =
 
 /**
  * Floating text "bouncer" — ephemeral text rendered at a tile coordinate
- * that fades out over ~1 second.
+ * that fades out.
+ *
+ * Per refinement-002 §J, duration is event-aware:
+ *   - damage:   600 ms (fast — combat is rapid)
+ *   - heal:     800 ms (slow = lingering goodness)
+ *   - generic:  600 ms (default; matches damage feel)
  */
 export interface FloatingTextSpec {
   tile: Point;
   text: string;
   /** Hex string ('#d44a4a') for Phaser Text colour. */
   color: string;
-  /** Default 'medium' (14px). 'large' (20px bold) for emphasis. */
+  /** Default 'medium' (14px). 'large' (22px bold) for emphasis. */
   size?: 'small' | 'medium' | 'large';
+  /** Override default 600 ms duration. Healing intents pass 800 ms. */
+  durationMs?: number;
 }
 
 export type GameEvent =

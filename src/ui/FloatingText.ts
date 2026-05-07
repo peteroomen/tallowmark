@@ -23,7 +23,7 @@ const HUD_KEEPOUT_RIGHT = 96;
  * primary feedback. Better silently clipped than rendered under chrome.
  */
 export function spawnFloatingText(scene: Phaser.Scene, spec: FloatingTextSpec): void {
-  const { tile, text, color, size = 'medium' } = spec;
+  const { tile, text, color, size = 'medium', durationMs = 600 } = spec;
   const wx = tile.x * TILE_SIZE + TILE_SIZE / 2;
   const wy = tile.y * TILE_SIZE + TILE_SIZE / 2;
 
@@ -55,11 +55,14 @@ export function spawnFloatingText(scene: Phaser.Scene, spec: FloatingTextSpec): 
     .setOrigin(0.5)
     .setDepth(70);
 
+  // Per refinement-002 §J: linear rise + easeIn fade in the last 200 ms.
+  // The default 600 ms feels punchy; heal floats use 800 ms (slow = lingering
+  // goodness — set via FloatingTextSpec.durationMs from the caller).
   scene.tweens.add({
     targets: obj,
     y: wy - 36,
     alpha: 0,
-    duration: 950,
+    duration: durationMs,
     ease: 'Quad.easeOut',
     onComplete: () => obj.destroy(),
   });

@@ -194,6 +194,12 @@ export class DungeonScene extends Phaser.Scene {
     this.logLines = [];
     this.bus.clear();
     this.cameras.main.resetFX();
+    // Per refinement-002 §J: 350 ms fade-IN on descent so the transition
+    // matches the descendToNextFloor fade-OUT. Other entry types (fresh /
+    // resume) skip this — the title card already does the framing work.
+    if (data.descend) {
+      this.cameras.main.fadeIn(350, 0, 0, 0);
+    }
 
     this.items = [];
     for (const s of this.trapSprites.values()) s.destroy();
@@ -435,6 +441,7 @@ export class DungeonScene extends Phaser.Scene {
       w.__tallowmark.applyStatus = (id, turns) => {
         applyStatusTo(this.runState.activeStatuses, id, turns ?? 5);
         this.log(`(dev) applied ${id} ×${turns ?? 5}`, 'discovery');
+        this.flashSpriteForStatus(this.playerSprite);
         getServices(this).save.saveRun(this.runState);
         this.refreshHud();
       };
@@ -960,17 +967,53 @@ export class DungeonScene extends Phaser.Scene {
   }
 
   /** Quick "lunge" toward a target tile and back — used for bump attacks. */
+  /**
+   * Per refinement-002 §J: 180 ms single white pulse on a target sprite when
+   * a status is applied. ONE pulse only — two reads as broken. The flash is a
+   * white rectangle overlay at depth 11 (above actors at 9-10), alpha 0.7 → 0.
+   */
+  private flashSpriteForStatus(sprite: Phaser.GameObjects.Image): void {
+    const overlay = this.add
+      .rectangle(sprite.x, sprite.y, TILE_SIZE, TILE_SIZE, 0xffffff, 0.7)
+      .setOrigin(0.5)
+      .setDepth(11);
+    this.tweens.add({
+      targets: overlay,
+      alpha: 0,
+      duration: 180,
+      ease: 'Quad.easeOut',
+      onComplete: () => overlay.destroy(),
+    });
+  }
+
   private lungeAt(sprite: Phaser.GameObjects.Image, target: Point): void {
+    // Per refinement-002 §J: 70 ms out + 70 ms back, with a ~6 px overshoot
+    // past the midpoint (easeOutBack). Reads as a real "throw weight into it"
+    // motion vs the previous symmetric yoyo.
     const from = { x: sprite.x, y: sprite.y };
     const to = tileToWorld(target.x, target.y);
-    const mid = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
+    // Vector toward target; midpoint + 6 px past the midpoint.
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const len = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+    const overshoot = 6;
+    const peakX = from.x + dx * 0.5 + (dx / len) * overshoot;
+    const peakY = from.y + dy * 0.5 + (dy / len) * overshoot;
     this.tweens.add({
       targets: sprite,
-      x: mid.x,
-      y: mid.y,
+      x: peakX,
+      y: peakY,
       duration: 70,
-      yoyo: true,
-      ease: 'Quad.easeOut',
+      ease: 'Back.easeOut',
+      onComplete: () => {
+        this.tweens.add({
+          targets: sprite,
+          x: from.x,
+          y: from.y,
+          duration: 70,
+          ease: 'Quad.easeIn',
+        });
+      },
     });
   }
 
@@ -1405,7 +1448,7 @@ export class DungeonScene extends Phaser.Scene {
   }
 
   /** Render (or refresh) a single trap sprite at its tile. */
-  private placeTrapSprite(trap: TrapState): void {
+  private placeTrapSprite(trap: TrapState, animate = false): void {
     const key = `${trap.pos.x},${trap.pos.y}`;
     const def = TRAP_CATALOG[trap.kind];
     if (!def) return;
@@ -1419,6 +1462,19 @@ export class DungeonScene extends Phaser.Scene {
       .setDepth(6) // below items (7) and actors (9-10), above floor tiles
       .setTint(parseInt(def.color.slice(1), 16));
     this.trapSprites.set(key, sprite);
+    if (animate) {
+      // Per refinement-002 §J: 200 ms scale 1.2 → 1, alpha 0 → 1, easeOutQuad.
+      // The scale-DOWN is the cue ("locking in"). Fires alongside the existing
+      // !Spotted! floating text emitted by the perception roll.
+      sprite.setAlpha(0).setScale(RENDER_SCALE * 1.2);
+      this.tweens.add({
+        targets: sprite,
+        alpha: 1,
+        scale: RENDER_SCALE,
+        duration: 200,
+        ease: 'Quad.easeOut',
+      });
+    }
   }
 
   private removeTrapSprite(pos: Point): void {
@@ -1458,6 +1514,7 @@ export class DungeonScene extends Phaser.Scene {
         result.applyStatusToTrigger.id,
         result.applyStatusToTrigger.turns,
       );
+      this.flashSpriteForStatus(this.playerSprite);
     }
     if (result.aoeTiles && result.applyStatusToAoe) {
       this.applyAoeStatus(result.aoeTiles, result.applyStatusToAoe.id, result.applyStatusToAoe.turns);
@@ -1494,6 +1551,7 @@ export class DungeonScene extends Phaser.Scene {
     for (const t of tiles) {
       if (t.x === this.player.pos.x && t.y === this.player.pos.y) {
         applyStatusTo(this.runState.activeStatuses, statusId, turns);
+        this.flashSpriteForStatus(this.playerSprite);
         break;
       }
     }
@@ -1502,6 +1560,8 @@ export class DungeonScene extends Phaser.Scene {
       if (!enemy.alive) continue;
       if (tiles.some((t) => t.x === enemy.pos.x && t.y === enemy.pos.y)) {
         applyStatusTo(enemy.statuses, statusId, turns);
+        const enemySprite = this.enemySprites.get(enemy.id);
+        if (enemySprite) this.flashSpriteForStatus(enemySprite);
       }
     }
   }
@@ -1542,7 +1602,8 @@ export class DungeonScene extends Phaser.Scene {
             spec: { tile: { ...trap.pos }, text: '!Spotted!', color: def.color, size: 'small' },
           });
         }
-        this.placeTrapSprite(trap);
+        // animate=true triggers the 200 ms scale 1.2→1 + alpha 0→1 reveal.
+        this.placeTrapSprite(trap, true);
       }
     }
   }
@@ -1609,7 +1670,7 @@ export class DungeonScene extends Phaser.Scene {
       } else if (ev.kind === 'regenHeal') {
         this.bus.emit({
           kind: 'floatingText',
-          spec: { tile: { ...this.player.pos }, text: `+${ev.amount ?? 1}`, color: '#6aa84a', size: 'small' },
+          spec: { tile: { ...this.player.pos }, text: `+${ev.amount ?? 1}`, color: '#6aa84a', size: 'small', durationMs: 800 },
         });
       } else if (ev.kind === 'statusExpired') {
         const def = ev.statusId ? STATUS_CATALOG[ev.statusId] : undefined;
@@ -1930,7 +1991,13 @@ export class DungeonScene extends Phaser.Scene {
     this.runState.traps = [];
     // Save before scene restart; the new create() will load this state.
     getServices(this).save.saveRun(this.runState);
-    this.scene.start(SCENE_KEYS.Dungeon, { descend: true });
+    // Per refinement-002 §J: 350 ms fade-out + 50 ms hold + 350 ms fade-in
+    // (the new scene's fadeIn). The HOLD is critical — without it the player
+    // doesn't register the transition happened. Total: 750 ms of stair travel.
+    this.cameras.main.fadeOut(350, 0, 0, 0);
+    this.time.delayedCall(400, () => {
+      this.scene.start(SCENE_KEYS.Dungeon, { descend: true });
+    });
   }
 
   private completeRunSurvived(): void {
