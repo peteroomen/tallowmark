@@ -1,0 +1,13 @@
+{
+	"folders": [
+		{
+			"name": "rouge-like",
+			"path": ".."
+		},
+		{
+			"name": "kenney_roguelike-caves-dungeons",
+			"path": "../../../Downloads/kenney_roguelike-caves-dungeons"
+		}
+	],
+	"settings": {}
+}

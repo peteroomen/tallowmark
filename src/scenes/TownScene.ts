@@ -500,7 +500,7 @@ export class TownScene extends Phaser.Scene {
     const y = 24;
     for (const it of items) {
       const slice = this.add
-        .nineslice(x, y, ASSET_KEYS.ui.large, it.frame, 36, 36, 6, 6, 6, 6)
+        .nineslice(x, y, ASSET_KEYS.ui.large, it.frame, 48, 48, 6, 6, 6, 6)
         .setOrigin(0.5)
         .setDepth(1000);
       this.add
@@ -513,7 +513,7 @@ export class TownScene extends Phaser.Scene {
         .setOrigin(0.5)
         .setDepth(1001);
       const zone = this.add
-        .zone(x, y, 36, 36)
+        .zone(x, y, 48, 48)
         .setOrigin(0.5)
         .setDepth(1002)
         .setInteractive({ useHandCursor: true });
@@ -529,7 +529,7 @@ export class TownScene extends Phaser.Scene {
         }
         it.onClick();
       });
-      x -= 42;
+      x -= 56; // 48px button + 8px gutter (per CLAUDE.md 48px touch floor)
     }
   }
 
@@ -940,12 +940,9 @@ export class TownScene extends Phaser.Scene {
   }
 
   private promptDescend(): void {
-    this.scene.launch(SCENE_KEYS.ConfirmDialog, {
-      title: 'Descend?',
-      body: 'You will lose any items on your person if you die.\nMeta-currency you earn returns with you.',
-      confirmText: 'Descend',
-      cancelText: 'Stay',
-      onConfirm: () => this.scene.start(SCENE_KEYS.Dungeon, { fresh: true }),
-    });
+    // Threshold replaces the bare confirm dialog (iter-2 stage 12 / refinement-002).
+    // The Threshold itself is the commitment surface; descent fires from there.
+    this.scene.launch(SCENE_KEYS.Threshold);
+    this.scene.pause();
   }
 }

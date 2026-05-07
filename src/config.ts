@@ -31,6 +31,7 @@ export const SCENE_KEYS = {
   MainMenu: 'MainMenu',
   Settings: 'Settings',
   Town: 'Town',
+  Threshold: 'Threshold',
   Dungeon: 'Dungeon',
   UI: 'UI',
   Pause: 'Pause',

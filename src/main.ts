@@ -4,6 +4,7 @@ import { BootScene } from '@/scenes/BootScene';
 import { MainMenuScene } from '@/scenes/MainMenuScene';
 import { SettingsScene } from '@/scenes/SettingsScene';
 import { TownScene } from '@/scenes/TownScene';
+import { ThresholdScene } from '@/scenes/ThresholdScene';
 import { DungeonScene } from '@/scenes/DungeonScene';
 import { UIScene } from '@/scenes/UIScene';
 import { PauseScene } from '@/scenes/PauseScene';
@@ -34,6 +35,7 @@ const config: Phaser.Types.Core.GameConfig = {
     MainMenuScene,
     SettingsScene,
     TownScene,
+    ThresholdScene,
     DungeonScene,
     UIScene,
     PauseScene,

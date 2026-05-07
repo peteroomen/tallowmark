@@ -25,6 +25,7 @@ import { CharsSheet, Inputs, UiLarge } from '@/world/FrameCatalog';
 import { KenneyPlank } from '@/ui/KenneyPlank';
 import { HpBar } from '@/ui/HpBar';
 import { HungerBar } from '@/ui/HungerBar';
+import { Minimap } from '@/ui/Minimap';
 import { FogMask, fogKey } from '@/ui/FogMask';
 import { computeFov } from '@/core/Fov';
 import { GameEventBus, type LogTone } from '@/core/Events';
@@ -124,6 +125,7 @@ export class DungeonScene extends Phaser.Scene {
   private hoverHighlight!: Phaser.GameObjects.Rectangle;
   private destinationMarker!: Phaser.GameObjects.Rectangle;
 
+  private minimap?: Minimap;
   private hpText!: Phaser.GameObjects.Text;
   private floorText!: Phaser.GameObjects.Text;
   /** Pre-allocated 4 log slots; index 0 is newest (bottom), 3 is oldest (top). */
@@ -263,6 +265,11 @@ export class DungeonScene extends Phaser.Scene {
     this.drawActors();
     this.drawHud();
     this.setupCamera();
+    this.minimap = new Minimap(
+      { scene: this, rightOffset: 8, bottomOffset: 110, pxPerTile: 3 },
+      this.dungeon.tiles.width,
+      this.dungeon.tiles.height,
+    );
 
     // Fog of war scaffold: rehydrate explored set, build the mask, do an
     // initial FoV compute so the player can see immediately on entry.
@@ -273,6 +280,7 @@ export class DungeonScene extends Phaser.Scene {
       rows: this.dungeon.tiles.height,
     });
     this.recomputeFov();
+    this.refreshMinimap();
 
     this.turnEngine.onWorldTick(() => this.runEnemyTurns());
     // Hunger + status ticks fire after enemy turns so any death this turn
@@ -786,7 +794,7 @@ export class DungeonScene extends Phaser.Scene {
     const y = 80;
     for (const it of items) {
       const slice = this.add
-        .nineslice(x, y, ASSET_KEYS.ui.large, it.frame, 36, 36, 6, 6, 6, 6)
+        .nineslice(x, y, ASSET_KEYS.ui.large, it.frame, 48, 48, 6, 6, 6, 6)
         .setOrigin(0.5)
         .setScrollFactor(0)
         .setDepth(1000);
@@ -804,7 +812,7 @@ export class DungeonScene extends Phaser.Scene {
       // clickable (avoids the Phaser Container hit-area quirk we saw on
       // KenneyButton).
       const zone = this.add
-        .zone(x, y, 36, 36)
+        .zone(x, y, 48, 48)
         .setOrigin(0.5)
         .setScrollFactor(0)
         .setDepth(1002)
@@ -821,7 +829,7 @@ export class DungeonScene extends Phaser.Scene {
         }
         it.onClick();
       });
-      x -= 42;
+      x -= 56; // 48px button + 8px gutter (per CLAUDE.md 48px touch floor)
     }
   }
 
@@ -997,6 +1005,16 @@ export class DungeonScene extends Phaser.Scene {
     const target = this.worldPointToTile(p.worldX, p.worldY);
     if (!this.dungeon.tiles.inBounds(target.x, target.y)) return;
 
+    // Tap distinction (per refinement-002 §09): adjacent tap = direct step
+    // (skip pathfinding), distant tap = auto-path. One rule, two behaviours,
+    // zero ambiguity. Tapping yourself = wait one turn.
+    if (chebyshev(this.player.pos, target) <= 1) {
+      this.autoPath = [];
+      this.destinationMarker.setVisible(false);
+      this.tryStep(target);
+      return;
+    }
+
     const enemy = this.enemyAt(target.x, target.y);
     const path = enemy
       ? findPathToBump(this.player.pos, target, (x, y) => this.isWalkable(x, y) && !this.enemyAt(x, y))
@@ -1027,6 +1045,10 @@ export class DungeonScene extends Phaser.Scene {
     }
     if (e.key === 'c' || e.code === 'KeyC') {
       this.openOverlay(SCENE_KEYS.Character);
+      return;
+    }
+    if (e.key === 'm' || e.key === 'M' || e.code === 'KeyM') {
+      this.minimap?.toggle();
       return;
     }
     if (e.key === 'q' || e.key === 'Q' || e.code === 'KeyQ') {
@@ -1164,9 +1186,31 @@ export class DungeonScene extends Phaser.Scene {
     this.runState.exploredTiles = Array.from(this.exploredTiles);
     getServices(this).save.saveRun(this.runState);
     this.refreshHud();
+    this.refreshMinimap();
     if (!this.player.alive) {
       this.handlePlayerDeath();
     }
+  }
+
+  /** Re-render the minimap from current dungeon state. Cheap. */
+  private refreshMinimap(): void {
+    if (!this.minimap) return;
+    const ghosts: Point[] = [];
+    for (const ghost of this.enemyGhostSprites.values()) {
+      const tx = Math.floor(ghost.x / TILE_SIZE);
+      const ty = Math.floor(ghost.y / TILE_SIZE);
+      ghosts.push({ x: tx, y: ty });
+    }
+    this.minimap.render({
+      tiles: this.dungeon.tiles,
+      visibleKeys: this.visibleTiles,
+      exploredKeys: this.exploredTiles,
+      playerPos: this.player.pos,
+      enemies: this.enemies.map((e) => ({ pos: e.pos, alive: e.alive })),
+      enemyGhosts: ghosts,
+      items: this.items.map((i) => ({ pos: i.pos })),
+      revealedTraps: this.runState.traps.filter((t) => t.revealed).map((t) => ({ pos: t.pos })),
+    });
   }
 
   /**
@@ -1762,13 +1806,37 @@ export class DungeonScene extends Phaser.Scene {
     this.runState.ended = { reason: 'death', turn: this.runState.turn };
     getServices(this).save.saveRun(this.runState);
 
-    // Cosmetic camera fade — kicks off the visual blackout. The QA pass
-    // proved we *cannot* rely on the FADE_OUT_COMPLETE event firing in every
-    // environment (it didn't fire in the agent's harness), so the actual
-    // scene transition is driven by a plain setTimeout. Browser-level timer:
-    // independent of Phaser's update loop, the scene's pause state, the
-    // camera's effect queue, or any other ambient state.
-    this.cameras.main.fadeOut(500, 0, 0, 0);
+    // Death beat polish per refinement-002 / iter-2 stage 12 spec:
+    //   1. Player sprite stays visible ~300 ms post-death (no blink-out).
+    //   2. World desaturates (cool tint), keeping contour visible — not blacks.
+    //   3. The "DIED" floating bouncer in code holds ~400 ms before the
+    //      camera fade kicks in.
+    // The 600 ms total budget matches the existing setTimeout below, so
+    // the scene-transition timing is unchanged; we're spending those 600 ms
+    // better.
+    //
+    // Desaturation: an alpha-rect over the whole viewport gives a cool
+    // grey wash so the world isn't blacked out — contour stays readable,
+    // "something happened to me" beats "screen replaced screen". Phaser
+    // Camera doesn't expose setTint at this version; the rect approach is
+    // simpler and renders above everything below the HUD.
+    this.add
+      .rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, 0x6a6470, 0.35)
+      .setScrollFactor(0)
+      .setDepth(900);
+    // Player sprite stays full-alpha + crisp for a beat — the held frame.
+    // Then a slow desaturate before the fade.
+    this.tweens.add({
+      targets: this.playerSprite,
+      alpha: 0.6,
+      duration: 300,
+      delay: 300,
+      ease: 'Quad.easeIn',
+    });
+    // Camera fade after the held frame + DIED bouncer hang.
+    this.time.delayedCall(400, () => {
+      this.cameras.main.fadeOut(200, 0, 0, 0);
+    });
     setTimeout(() => {
       if (this.deathTransitionFired) return;
       this.deathTransitionFired = true;

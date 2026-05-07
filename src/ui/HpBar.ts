@@ -26,6 +26,7 @@ const COLOR_LOW = 0xb84a4a; // red
 export class HpBar extends Phaser.GameObjects.Container {
   private readonly fill: Phaser.GameObjects.Rectangle;
   private readonly innerW: number;
+  private pulseTween?: Phaser.Tweens.Tween;
 
   constructor(opts: HpBarOptions) {
     super(opts.scene, opts.x, opts.y);
@@ -53,5 +54,22 @@ export class HpBar extends Phaser.GameObjects.Container {
     const pct = max > 0 ? Math.max(0, Math.min(1, current / max)) : 0;
     this.fill.width = Math.max(0, this.innerW * pct);
     this.fill.fillColor = pct > 0.55 ? COLOR_FULL : pct > 0.25 ? COLOR_MID : COLOR_LOW;
+    // QA-v6 polish: pulse the fill alpha when at ≤ 25% HP. Subtle but the
+    // only motion in the HUD — earned, exactly when the player needs it.
+    const danger = pct > 0 && pct <= 0.25;
+    if (danger && !this.pulseTween) {
+      this.pulseTween = this.scene.tweens.add({
+        targets: this.fill,
+        alpha: { from: 1, to: 0.55 },
+        duration: 600,
+        ease: 'Sine.easeInOut',
+        yoyo: true,
+        repeat: -1,
+      });
+    } else if (!danger && this.pulseTween) {
+      this.pulseTween.stop();
+      this.pulseTween = undefined;
+      this.fill.alpha = 1;
+    }
   }
 }
