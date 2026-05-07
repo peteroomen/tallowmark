@@ -26,6 +26,7 @@ import { KenneyPlank } from '@/ui/KenneyPlank';
 import { HpBar } from '@/ui/HpBar';
 import { HungerBar } from '@/ui/HungerBar';
 import { Minimap } from '@/ui/Minimap';
+import { StatusIcon } from '@/ui/StatusIcon';
 import { FogMask, fogKey } from '@/ui/FogMask';
 import { computeFov } from '@/core/Fov';
 import { GameEventBus, type LogTone } from '@/core/Events';
@@ -881,21 +882,24 @@ export class DungeonScene extends Phaser.Scene {
 
   /** Rebuild the status-icon row in the HUD. Icons tinted by status colour. */
   private refreshStatusIcons(): void {
+    // Per refinement-002 §B: programmatic 3-field status icons (glyph +
+    // colour + frame style) with 3-state countdown. The new StatusIcon
+    // widget owns its own pulse + flash tweens, so we just instantiate
+    // and call setTurnsRemaining for each active status.
     this.statusIconLayer.removeAll(true);
-    const ICON = 18;
-    const STRIDE = 36;
+    const ICON = 36;
+    const LABEL_W = 36; // room for "Fort 12" label after each icon
+    const STRIDE = ICON + LABEL_W;
     let i = 0;
     for (const s of this.runState.activeStatuses) {
       const def = STATUS_CATALOG[s.id];
       if (!def) continue;
-      const x = i * STRIDE;
-      const icon = this.add
-        .image(x, 0, ASSET_KEYS.sprites.rpg, def.iconFrame)
-        .setOrigin(0, 0.5)
-        .setScale(ICON / 16)
-        .setTint(parseInt(def.color.slice(1), 16));
-      const countdown = this.add
-        .text(x + ICON + 4, 0, `${def.label}${s.turnsRemaining}`, {
+      const x = i * STRIDE + ICON / 2;
+      const icon = new StatusIcon(this, def, ICON);
+      icon.setPosition(x, 0);
+      icon.setTurnsRemaining(s.turnsRemaining);
+      const label = this.add
+        .text(x + ICON / 2 + 4, 0, def.label, {
           fontFamily: 'monospace',
           fontSize: '10px',
           color: def.color,
@@ -903,7 +907,7 @@ export class DungeonScene extends Phaser.Scene {
           strokeThickness: 2,
         })
         .setOrigin(0, 0.5);
-      this.statusIconLayer.add([icon, countdown]);
+      this.statusIconLayer.add([icon, label]);
       i++;
     }
   }
