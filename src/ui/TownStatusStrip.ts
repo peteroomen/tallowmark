@@ -94,6 +94,7 @@ export class TownStatusStrip extends Phaser.GameObjects.Container {
   }
 }
 
-// toRoman lives in `./numerals` so test files can import it without pulling
-// Phaser into jsdom. Re-exported here for convenient import-from-strip use.
-export { toRoman } from './numerals';
+// toRoman lives in `./numerals` (kept Phaser-free for jsdom test imports).
+// Importers that need it should `import { toRoman } from '@/ui/numerals'`
+// directly — no re-export here, since the local import at the top of this
+// file would collide on HMR (QA-flagged BLOCKER-2).

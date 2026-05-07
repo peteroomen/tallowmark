@@ -409,8 +409,17 @@
   "tileheight": 16,
   "tilesets": [
     {
+      "columns": 57,
       "firstgid": 1,
-      "source": "rpg.tsj"
+      "image": "../sprites/rpg.png",
+      "imageheight": 526,
+      "imagewidth": 968,
+      "margin": 0,
+      "name": "rpg",
+      "spacing": 1,
+      "tilecount": 1767,
+      "tileheight": 16,
+      "tilewidth": 16
     }
   ],
   "tilewidth": 16,

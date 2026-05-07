@@ -74,6 +74,8 @@ export class TownScene extends Phaser.Scene {
   // Map data + editor.
   private mapData!: MapData;
   private editor!: MapEditor;
+  /** Town Status strip widget — re-read state via `refreshStatusStrip()`. */
+  private statusStrip?: TownStatusStrip;
   /** Per-layer 2D arrays of sprite refs so we can re-render single tiles. */
   private layerSprites: Record<string, Array<Array<Phaser.GameObjects.Image | undefined>>> = {};
 
@@ -385,6 +387,10 @@ export class TownScene extends Phaser.Scene {
           s.resources.embers -= cost;
           s.pendingStatuses.push({ id: 'healing', turnsRemaining: 10 });
         });
+        // QA-flagged P1: Town Status strip rendered once at scene-create
+        // and ignored mid-session changes. Refresh now so the new ember
+        // count reads correctly without leaving + re-entering town.
+        this.refreshStatusStrip();
       };
     }
     this.scene.launch(SCENE_KEYS.ConfirmDialog, {
@@ -559,21 +565,31 @@ export class TownScene extends Phaser.Scene {
   }
 
   private drawHud(): void {
-    const services = getServices(this);
     // Iter-3 stage 2b: replaces the old TALLOWMARK plank + Embers count with
     // the proper Town Status strip per refinement-002 §M. Single-line
     // element along the top, full-width. Iter-7 will add Renown numeral +
     // shops-open + NEW callout segments; this stage ships day + embers.
-    const strip = new TownStatusStrip(this);
-    strip.set({
+    this.statusStrip = new TownStatusStrip(this);
+    this.refreshStatusStrip();
+    this.drawHudIcons();
+    this.drawFooter();
+    void COLORS;
+  }
+
+  /**
+   * Re-read PersistentState into the Town Status strip. Called on scene
+   * create AND after any town action that changes embers / day / shops
+   * (e.g. Inn rest). Without this, the strip rendered once at scene-create
+   * time and ignored mid-session changes (QA-flagged P1).
+   */
+  private refreshStatusStrip(): void {
+    if (!this.statusStrip) return;
+    const services = getServices(this);
+    this.statusStrip.set({
       day: services.persistent.descentCount,
       embers: services.persistent.resources.embers,
       // shopsOpen + renown + newCallout populated by iter-3 stage 5 + iter-7
     });
-    this.drawHudIcons();
-    this.drawFooter();
-    void COLORS;
-    void strip; // silence unused-var; strip is added to scene by Container ctor
   }
 
   private drawHudIcons(): void {
