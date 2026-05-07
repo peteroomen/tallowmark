@@ -285,7 +285,7 @@ export class InventoryScene extends Phaser.Scene {
         }
         case 'embers': {
           getServices(this).setPersistent((s) => {
-            s.metaCurrency += intent.amount;
+            s.resources.embers += intent.amount;
           });
           break;
         }

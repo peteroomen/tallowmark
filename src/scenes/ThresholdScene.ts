@@ -45,7 +45,7 @@ export class ThresholdScene extends Phaser.Scene {
       .setOrigin(0.5);
 
     // Today's state card — three lines, ledger-style.
-    const meta = services.persistent.metaCurrency;
+    const meta = services.persistent.resources.embers;
     const founders =
       services.persistent.rescuedFounders.length > 0
         ? services.persistent.rescuedFounders.join(', ')

@@ -75,11 +75,27 @@ export class SaveStore {
   private migratePersistent(input: unknown): PersistentState {
     const def = defaultPersistentState();
     if (!input || typeof input !== 'object') return def;
-    const p = input as Partial<PersistentState>;
-    if (p.schemaVersion !== PERSISTENT_SCHEMA_VERSION) return def;
+    // Persistent schema bumped 1 → 2 in iter-3 stage 5b for the multi-resource
+    // refactor. Schema 1 saves had `metaCurrency: number`; schema 2 saves have
+    // `resources.embers: number`. The migration accepts either and produces
+    // schema 2 — old players don't lose their banked Embers.
+    const p = input as Omit<Partial<PersistentState>, 'schemaVersion'> & {
+      schemaVersion?: number;
+      metaCurrency?: number;
+    };
+    if (p.schemaVersion !== 1 && p.schemaVersion !== PERSISTENT_SCHEMA_VERSION) return def;
+    const wallet =
+      p.resources && typeof p.resources === 'object'
+        ? {
+            embers: typeof p.resources.embers === 'number' ? p.resources.embers : 0,
+            ...(typeof p.resources.ore === 'number' ? { ore: p.resources.ore } : {}),
+            ...(typeof p.resources.bone === 'number' ? { bone: p.resources.bone } : {}),
+            ...(typeof p.resources.glass === 'number' ? { glass: p.resources.glass } : {}),
+          }
+        : { embers: typeof p.metaCurrency === 'number' ? p.metaCurrency : 0 };
     return {
       schemaVersion: PERSISTENT_SCHEMA_VERSION,
-      metaCurrency: typeof p.metaCurrency === 'number' ? p.metaCurrency : 0,
+      resources: wallet,
       rescuedFounders: Array.isArray(p.rescuedFounders) ? p.rescuedFounders.filter((s) => typeof s === 'string') : [],
       unlockedItemPool: Array.isArray(p.unlockedItemPool)
         ? p.unlockedItemPool.filter((s) => typeof s === 'string')

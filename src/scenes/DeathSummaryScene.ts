@@ -33,7 +33,7 @@ export class DeathSummaryScene extends Phaser.Scene {
     // Bank embers (formula factors floor + turns + kills).
     const embers = Math.max(1, data.floor * 5 + Math.floor(data.turn / 3) + data.kills * 2);
     services.setPersistent((s) => {
-      s.metaCurrency += embers;
+      s.resources.embers += embers;
     });
     services.save.clearRun();
 
@@ -86,7 +86,7 @@ export class DeathSummaryScene extends Phaser.Scene {
         110,
         'EMBERS BANKED',
         `+ ${embers}`,
-        `Total: ${services.persistent.metaCurrency}`,
+        `Total: ${services.persistent.resources.embers}`,
         '#d4a24c',
       ),
     );
@@ -208,7 +208,7 @@ export class DeathSummaryScene extends Phaser.Scene {
     services: ReturnType<typeof getServices>,
     deepestFloor: number,
   ): { title: string; body: string } {
-    const meta = services.persistent.metaCurrency;
+    const meta = services.persistent.resources.embers;
     const founders = services.persistent.rescuedFounders.length;
     if (founders === 0 && deepestFloor < 3) {
       return {

@@ -43,7 +43,7 @@ describe('SaveStore', () => {
 
   it('round-trips persistent state', () => {
     const p = defaultPersistentState();
-    p.metaCurrency = 250;
+    p.resources.embers = 250;
     p.rescuedFounders.push('Apothecary');
     store.savePersistent(p);
     expect(store.loadPersistent()).toEqual(p);
@@ -51,7 +51,7 @@ describe('SaveStore', () => {
 
   it('persistent and run are stored independently in the same blob', () => {
     const p = defaultPersistentState();
-    p.metaCurrency = 99;
+    p.resources.embers = 99;
     store.savePersistent(p);
 
     const r = newRunState(42, { x: 5, y: 5 });
@@ -63,12 +63,37 @@ describe('SaveStore', () => {
 
   it('clearRun wipes only the run half', () => {
     const p = defaultPersistentState();
-    p.metaCurrency = 5;
+    p.resources.embers = 5;
     store.savePersistent(p);
     store.saveRun(newRunState(1, { x: 0, y: 0 }));
     store.clearRun();
     expect(store.loadRun()).toBeNull();
-    expect(store.loadPersistent().metaCurrency).toBe(5);
+    expect(store.loadPersistent().resources.embers).toBe(5);
+  });
+
+  it('migrates v1 persistent saves: metaCurrency → resources.embers', () => {
+    // Schema 1 had `metaCurrency: number`; schema 2 has `resources.embers`.
+    // Old players should keep their banked Embers across the schema bump.
+    storage.setItem(
+      SAVE_KEY,
+      JSON.stringify({
+        persistent: {
+          schemaVersion: 1,
+          metaCurrency: 173,
+          rescuedFounders: ['Apothecary'],
+          unlockedItemPool: [],
+          townUpgrades: {},
+          audio: { master: 0.8, music: 0.6, sfx: 0.8 },
+          hasCompletedFirstRun: true,
+        },
+        run: null,
+      }),
+    );
+    const loaded = store.loadPersistent();
+    expect(loaded.schemaVersion).toBe(2);
+    expect(loaded.resources.embers).toBe(173);
+    expect(loaded.rescuedFounders).toEqual(['Apothecary']);
+    expect(loaded.hasCompletedFirstRun).toBe(true);
   });
 
   it('clearAll wipes the save key entirely', () => {

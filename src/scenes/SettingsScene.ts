@@ -99,7 +99,7 @@ export class SettingsScene extends Phaser.Scene {
         services.save.clearAll();
         const fresh = services.save.loadPersistent();
         services.setPersistent((s) => {
-          s.metaCurrency = fresh.metaCurrency;
+          s.resources = fresh.resources;
           s.rescuedFounders = fresh.rescuedFounders;
           s.unlockedItemPool = fresh.unlockedItemPool;
           s.townUpgrades = fresh.townUpgrades;

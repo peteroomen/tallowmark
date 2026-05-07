@@ -477,7 +477,7 @@ export class TownScene extends Phaser.Scene {
       .setOrigin(0, 0)
       .setDepth(1000);
     this.add
-      .text(14, 32, `Embers: ${services.persistent.metaCurrency}`, {
+      .text(14, 32, `Embers: ${services.persistent.resources.embers}`, {
         fontFamily: 'monospace',
         fontSize: '12px',
         color: '#e5e3d8',

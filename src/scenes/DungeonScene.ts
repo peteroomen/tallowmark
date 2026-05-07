@@ -1937,7 +1937,7 @@ export class DungeonScene extends Phaser.Scene {
     const speedBonus = Math.max(0, 30 - Math.floor(this.runState.turn / 5));
     const reward = 10 + depthBonus + speedBonus;
     services.setPersistent((s) => {
-      s.metaCurrency += reward;
+      s.resources.embers += reward;
       s.hasCompletedFirstRun = true;
     });
     services.save.clearRun();
