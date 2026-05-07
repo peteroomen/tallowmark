@@ -356,11 +356,13 @@ export class DungeonScene extends Phaser.Scene {
         this.runState.traps.push(trap);
         this.placeTrapSprite(trap);
         this.handleTrapStep();
+        getServices(this).save.saveRun(this.runState);
         this.refreshHud();
       };
       w.__tallowmark.applyStatus = (id, turns) => {
         applyStatusTo(this.runState.activeStatuses, id, turns ?? 5);
         this.log(`(dev) applied ${id} ×${turns ?? 5}`, 'discovery');
+        getServices(this).save.saveRun(this.runState);
         this.refreshHud();
       };
       w.__tallowmark.giveItem = (defId, count) => {
@@ -377,6 +379,10 @@ export class DungeonScene extends Phaser.Scene {
           else this.runState.inventory.push({ defId: def.id, count: 1 });
         }
         this.log(`(dev) +${count ?? 1} ${def.trueName}`, 'discovery');
+        // Persist so the next InventoryScene open (which loads from
+        // SaveStore) sees the new items. QA-v6 caught this — without the
+        // save, the in-memory mutation was invisible to the overlay.
+        getServices(this).save.saveRun(this.runState);
       };
     }
     void COLORS;
