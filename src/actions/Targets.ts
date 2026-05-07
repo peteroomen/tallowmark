@@ -76,3 +76,25 @@ export type Target =
   | StairsTarget
   | TrapTarget
   | WallTarget;
+
+/** Short human-readable description of a target. Used by Examine stubs / logs. */
+export function describeTarget(target: Target): string {
+  switch (target.kind) {
+    case 'self':
+      return 'yourself';
+    case 'floor_tile':
+      return `floor at ${target.pos.x},${target.pos.y}`;
+    case 'enemy':
+      return `enemy at ${target.pos.x},${target.pos.y}`;
+    case 'item_on_floor':
+      return `item ${target.defId} at ${target.pos.x},${target.pos.y}`;
+    case 'item_in_bag':
+      return `bag slot ${target.slotIndex} (${target.defId})`;
+    case 'stairs':
+      return `stairs ${target.direction}`;
+    case 'trap':
+      return `${target.trapKind} trap`;
+    case 'wall':
+      return 'wall';
+  }
+}

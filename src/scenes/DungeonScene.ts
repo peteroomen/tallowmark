@@ -27,6 +27,10 @@ import { HpBar } from '@/ui/HpBar';
 import { HungerBar } from '@/ui/HungerBar';
 import { Minimap } from '@/ui/Minimap';
 import { StatusIcon } from '@/ui/StatusIcon';
+import { ActionWheel } from '@/ui/ActionWheel';
+import { WheelGestureManager } from '@/ui/WheelGestures';
+import { describeTarget, type Target } from '@/actions/Targets';
+import type { VerbId } from '@/actions/Verbs';
 import { FogMask, fogKey } from '@/ui/FogMask';
 import { computeFov } from '@/core/Fov';
 import { GameEventBus, type LogTone } from '@/core/Events';
@@ -149,6 +153,10 @@ export class DungeonScene extends Phaser.Scene {
 
   /** Window-level keydown handler (QA workaround for physical '.' key). */
   private windowKeyHandler?: (e: KeyboardEvent) => void;
+
+  /** Action Wheel + gesture manager. Shipped iter-3 stage 4d. */
+  private actionWheel?: ActionWheel;
+  private wheelGestures?: WheelGestureManager;
 
   /** Has the player heard the "distant echoes" rumble on this floor yet? */
   private rumbleHeard = false;
@@ -329,6 +337,21 @@ export class DungeonScene extends Phaser.Scene {
     // (starvation, poison) is resolved together with combat damage.
     this.turnEngine.onWorldTick(() => this.runPlayerTicks());
 
+    // Action Wheel + gesture manager (iter-3 stage 4d). The gesture manager
+    // intercepts long-press / right-click / Space / 1-6 / Esc and fires
+    // verbs through resolveVerb/onPickVerb. The legacy onClick still runs
+    // for plain taps (gesture manager's shouldPropagate() gates it).
+    this.actionWheel = new ActionWheel(this);
+    this.wheelGestures = new WheelGestureManager({
+      scene: this,
+      wheel: this.actionWheel,
+      tileSize: TILE_SIZE,
+      resolveTarget: (worldX, worldY) => this.resolveTargetAt(worldX, worldY),
+      selfTarget: () => ({ kind: 'self' }),
+      onPickVerb: (verb, target) => this.dispatchVerb(verb, target),
+    });
+    this.wheelGestures.attach();
+
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => this.onClick(p));
     this.input.on('pointermove', (p: Phaser.Input.Pointer) => this.onMouseMove(p));
     this.input.keyboard?.on('keydown', (e: KeyboardEvent) => this.onKey(e));
@@ -390,6 +413,14 @@ export class DungeonScene extends Phaser.Scene {
         window.removeEventListener('keydown', this.windowKeyHandler, { capture: true });
         document.removeEventListener('keydown', this.windowKeyHandler, { capture: true });
         this.windowKeyHandler = undefined;
+      }
+      if (this.wheelGestures) {
+        this.wheelGestures.detach();
+        this.wheelGestures = undefined;
+      }
+      if (this.actionWheel) {
+        this.actionWheel.closeImmediate();
+        this.actionWheel = undefined;
       }
     });
 
@@ -1118,8 +1149,121 @@ export class DungeonScene extends Phaser.Scene {
     this.hoverHighlight.setStrokeStyle(2, blocked ? 0xb84a4a : 0xffd76a, 0.85);
   }
 
+  /**
+   * Resolve a pointer position to a Target for the Action Wheel. Walks the
+   * existing entity lookups (enemyAt / items / traps / stairs / walls) so
+   * the wheel addresses the same things the legacy click handler does.
+   */
+  private resolveTargetAt(worldX: number, worldY: number): Target | null {
+    const tile = this.worldPointToTile(worldX, worldY);
+    if (!this.dungeon.tiles.inBounds(tile.x, tile.y)) return null;
+    const enemy = this.enemyAt(tile.x, tile.y);
+    if (enemy) {
+      return { kind: 'enemy', pos: { ...enemy.pos }, enemyId: enemy.id };
+    }
+    const trap = this.runState.traps.find(
+      (t) => t.revealed && t.pos.x === tile.x && t.pos.y === tile.y,
+    );
+    if (trap) {
+      return { kind: 'trap', pos: { ...trap.pos }, trapKind: trap.kind };
+    }
+    const item = this.items.find((i) => i.pos.x === tile.x && i.pos.y === tile.y);
+    if (item) {
+      return { kind: 'item_on_floor', pos: { ...item.pos }, defId: item.defId };
+    }
+    const tileKind = this.dungeon.tiles.get(tile.x, tile.y);
+    if (tileKind === TileKind.StairsDown) {
+      return { kind: 'stairs', direction: 'down', pos: { ...tile } };
+    }
+    if (tileKind === TileKind.StairsUp) {
+      return { kind: 'stairs', direction: 'up', pos: { ...tile } };
+    }
+    if (!this.isWalkable(tile.x, tile.y)) {
+      return { kind: 'wall', pos: { ...tile } };
+    }
+    return { kind: 'floor_tile', pos: { ...tile } };
+  }
+
+  /** Action Wheel verb dispatch. Routes to scene-side handlers per verb. */
+  private dispatchVerb(verb: VerbId, target: Target): void {
+    if (!this.player.alive) return;
+    switch (verb) {
+      case 'wait':
+        this.autoPath = [];
+        this.destinationMarker.setVisible(false);
+        this.tryStep(this.player.pos);
+        return;
+      case 'search':
+        this.searchBoost = true;
+        this.log('You search the area.', 'discovery');
+        this.tryStep(this.player.pos);
+        return;
+      case 'open_inventory':
+        this.openOverlay(SCENE_KEYS.Inventory);
+        return;
+      case 'open_character':
+        this.openOverlay(SCENE_KEYS.Character);
+        return;
+      case 'walk_to':
+      case 'pick_up':
+      case 'step_over':
+        // Re-use the legacy click-to-path against the target's tile.
+        if ('pos' in target) this.startPathTo(target.pos);
+        return;
+      case 'attack': {
+        if (target.kind !== 'enemy') return;
+        // Walk into the enemy — bump combat fires when adjacent.
+        this.startPathTo(target.pos);
+        return;
+      }
+      case 'descend':
+      case 'climb':
+        // Walk to the stairs; on-arrival the existing tryStep handlers fire.
+        if (target.kind === 'stairs') this.startPathTo(target.pos);
+        return;
+      case 'examine':
+        // Stage 5a will ship the Examine bottom-sheet. For now log a stub.
+        this.log(`(Examine: ${describeTarget(target)})`, 'neutral');
+        return;
+      case 'use':
+      case 'drop':
+        // These belong to InventoryScene's flow (item-in-bag target).
+        // Open the inventory and let the player pick the slot there.
+        this.openOverlay(SCENE_KEYS.Inventory);
+        return;
+      case 'cast':
+      case 'disarm':
+      case 'apply':
+        // Iter-4 verbs. No-op stub.
+        this.log(`${verb} — coming in iter 4.`, 'neutral');
+        return;
+    }
+  }
+
+  /** Helper: kick off auto-path to a tile (extracted from onClick). */
+  private startPathTo(tile: Point): void {
+    if (chebyshev(this.player.pos, tile) <= 1) {
+      this.autoPath = [];
+      this.destinationMarker.setVisible(false);
+      this.tryStep(tile);
+      return;
+    }
+    const enemy = this.enemyAt(tile.x, tile.y);
+    const path = enemy
+      ? findPathToBump(this.player.pos, tile, (x, y) => this.isWalkable(x, y) && !this.enemyAt(x, y))
+      : findPath(this.player.pos, tile, (x, y) => this.isWalkable(x, y) && !this.enemyAt(x, y));
+    if (path.length <= 1) return;
+    this.autoPath = path.slice(1);
+    this.autoStepTimer = 0;
+    const goal = path[path.length - 1]!;
+    const w = tileToWorld(goal.x, goal.y);
+    this.destinationMarker.setPosition(w.x, w.y).setVisible(true);
+  }
+
   private onClick(p: Phaser.Input.Pointer): void {
     if (!this.player.alive) return;
+    // Gesture manager's veto — long-press fired or right-click was wheel-only.
+    if (this.wheelGestures && !this.wheelGestures.shouldPropagate(p)) return;
     const target = this.worldPointToTile(p.worldX, p.worldY);
     if (!this.dungeon.tiles.inBounds(target.x, target.y)) return;
 
