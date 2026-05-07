@@ -389,20 +389,24 @@ export class TownScene extends Phaser.Scene {
     decor.push({ x: 22, y: 7, frame: TilesRPG.anvil });
 
     // Cemetery — bottom-right (cols 20-23, rows 12-15). A small graveyard
-    // beyond the dungeon arch with fence boundary on the north side.
+    // beyond the dungeon arch with fence boundary on the north side. QA-pass-v5
+    // found the gravestone/cross frame indices (520-522, 575-576) were
+    // unverified and didn't render as expected — using rockSmall (confirmed)
+    // as placeholders. F9-verify the real grave/cross frames before swapping.
     decor.push({ x: 20, y: 12, frame: TilesRPG.fenceH });
     decor.push({ x: 21, y: 12, frame: TilesRPG.fenceHMid });
     decor.push({ x: 22, y: 12, frame: TilesRPG.fenceH });
     decor.push({ x: 23, y: 12, frame: TilesRPG.fenceHEnd });
-    decor.push({ x: 20, y: 13, frame: TilesRPG.gravestone1 });
-    decor.push({ x: 22, y: 13, frame: TilesRPG.gravestone2 });
-    decor.push({ x: 21, y: 14, frame: TilesRPG.crossStone });
-    decor.push({ x: 23, y: 14, frame: TilesRPG.gravestone3 });
-    decor.push({ x: 20, y: 15, frame: TilesRPG.crossWood });
-    decor.push({ x: 22, y: 15, frame: TilesRPG.crossStone });
+    decor.push({ x: 20, y: 13, frame: TilesRPG.rockSmall });
+    decor.push({ x: 22, y: 13, frame: TilesRPG.rockSmall });
+    decor.push({ x: 21, y: 14, frame: TilesRPG.rockSmall });
+    decor.push({ x: 23, y: 14, frame: TilesRPG.rockSmall });
+    decor.push({ x: 20, y: 15, frame: TilesRPG.rockSmall });
+    decor.push({ x: 22, y: 15, frame: TilesRPG.rockSmall });
 
-    // Signpost / well near the dungeon entrance to mark the path.
-    decor.push({ x: 16, y: 11, frame: TilesRPG.wellStone });
+    // Well (placeholder — same story as cemetery; rockSmall stand-in until
+    // F9 verifies a proper well frame).
+    decor.push({ x: 16, y: 11, frame: TilesRPG.rockSmall });
 
     // Ambient scatter — flowers, mushrooms, small rocks, the odd bush. Small
     // touches to break up open grass.

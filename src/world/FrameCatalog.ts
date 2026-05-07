@@ -115,21 +115,23 @@ export const TilesRPG = {
   mushroomSmall: rpg(5, 3), // 176
   mushroomTall: rpg(6, 3), // 177
 
-  // Well (row 5 col 12)
-  wellStone: rpg(12, 5), // 297
+  // Well (TODO — frame 297 was unverified; QA reported it doesn't read as a
+  // well. Re-pick via F9 inspector. For now, TownScene uses rockSmall.)
+  wellStone: rpg(12, 5), // 297 — UNVERIFIED
 
-  // Flowers
+  // Flowers (UNVERIFIED — frames 513, 342 picked from a screenshot pre-QA)
   flowerWhite: rpg(0, 9), // 513
   flowerRed: rpg(0, 6), // 342
 
-  // Gravestones (row 9 cols 7-9)
-  gravestone1: rpg(7, 9), // 520
-  gravestone2: rpg(8, 9), // 521
-  gravestone3: rpg(9, 9), // 522
+  // Gravestones (TODO — frames 520-522 were unverified; QA reported they
+  // don't render as gravestones. Re-pick via F9. TownScene uses rockSmall.)
+  gravestone1: rpg(7, 9), // 520 — UNVERIFIED
+  gravestone2: rpg(8, 9), // 521 — UNVERIFIED
+  gravestone3: rpg(9, 9), // 522 — UNVERIFIED
 
-  // Stone crosses (row 10 cols 5-6)
-  crossStone: rpg(5, 10), // 575
-  crossWood: rpg(6, 10), // 576
+  // Stone crosses (UNVERIFIED — same QA pass, same recommendation.)
+  crossStone: rpg(5, 10), // 575 — UNVERIFIED
+  crossWood: rpg(6, 10), // 576 — UNVERIFIED
 
   // Doors / windows (CONFIRMED at column 38+ in row 0)
   doorWood: rpg(38, 0), // 38

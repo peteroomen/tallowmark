@@ -159,7 +159,8 @@ export class DungeonScene extends Phaser.Scene {
 
     // Scenes are reused — reset transient state.
     if (this.windowKeyHandler) {
-      window.removeEventListener('keydown', this.windowKeyHandler);
+      window.removeEventListener('keydown', this.windowKeyHandler, { capture: true });
+      document.removeEventListener('keydown', this.windowKeyHandler, { capture: true });
       this.windowKeyHandler = undefined;
     }
     this.deathSequenceStarted = false;
@@ -241,13 +242,22 @@ export class DungeonScene extends Phaser.Scene {
       kb.on('keydown-NUMPAD_FIVE', () => {
         if (this.player.alive) this.tryStep(this.player.pos);
       });
+      // V6 fix: explicitly tell Phaser to capture (preventDefault) the period
+      // keys at the keyboard-plugin level. Stops the browser from routing
+      // physical '.' presses to focused-but-invisible DOM elements after the
+      // first interaction (the QA-pass-v5 bug — '.' worked once then went
+      // silent). With addCapture, Phaser owns these keys exclusively.
+      kb.addCapture('PERIOD,NUMPAD_DECIMAL,NUMPAD_FIVE');
     }
 
-    // Last-resort window listener — QA found that physical '.' keypresses
-    // weren't reaching Phaser's keyboard plugin in some browsers (canvas-
-    // focus capture issue), even though programmatic document.dispatchEvent
-    // worked. Binding directly to window catches the keydown before any
-    // Phaser focus filtering. Stored on `this` so we can detach on shutdown.
+    // V6 fix — last-resort listener stack. Three QA passes have surfaced the
+    // same regression: physical '.' presses stop reaching the game after the
+    // first interaction. Each previous fix (kb.on, then window listener)
+    // worked in isolation but failed in some browser/focus combinations.
+    // This round: capture-phase listener on BOTH window AND document, so we
+    // intercept the keydown at the earliest possible point regardless of which
+    // element the browser has focused. capture: true ensures we run before
+    // any handler that might call stopPropagation.
     this.windowKeyHandler = (e: KeyboardEvent) => {
       if (!this.player.alive) return;
       if (this.scene.isPaused()) return;
@@ -261,14 +271,21 @@ export class DungeonScene extends Phaser.Scene {
         c === 'Period' ||
         c === 'NumpadDecimal'
       ) {
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.log('[period-key v6] received', { key: e.key, code: e.code });
+        }
         e.preventDefault();
+        e.stopPropagation();
         this.tryStep(this.player.pos);
       }
     };
-    window.addEventListener('keydown', this.windowKeyHandler);
+    window.addEventListener('keydown', this.windowKeyHandler, { capture: true });
+    document.addEventListener('keydown', this.windowKeyHandler, { capture: true });
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       if (this.windowKeyHandler) {
-        window.removeEventListener('keydown', this.windowKeyHandler);
+        window.removeEventListener('keydown', this.windowKeyHandler, { capture: true });
+        document.removeEventListener('keydown', this.windowKeyHandler, { capture: true });
         this.windowKeyHandler = undefined;
       }
     });
@@ -306,7 +323,18 @@ export class DungeonScene extends Phaser.Scene {
     // Dev hook for tests / AI agents — exposes a way to trigger game events
     // without needing to drive the BSP-generated layout to a specific state.
     if (import.meta.env.DEV) {
-      const w = window as unknown as { __tallowmark?: { killPlayer?: () => void } };
+      // Dev hooks for QA / AI agents — surface in window.__tallowmark.* so the
+      // QA agent can deterministically trigger features that are otherwise
+      // gated by RNG (which trap kind spawned, which item, etc.). Each hook
+      // is no-op if its preconditions aren't met (e.g. no trap nearby).
+      const w = window as unknown as {
+        __tallowmark?: {
+          killPlayer?: () => void;
+          triggerTrap?: (kind?: 'spike' | 'gas' | 'alarm') => void;
+          applyStatus?: (id: StatusId, turns?: number) => void;
+          giveItem?: (defId: string, count?: number) => void;
+        };
+      };
       w.__tallowmark = w.__tallowmark ?? {};
       w.__tallowmark.killPlayer = () => {
         this.player.stats.hp = 0;
@@ -318,6 +346,37 @@ export class DungeonScene extends Phaser.Scene {
           spec: { tile: { ...this.player.pos }, text: 'DIED', color: FT_COLOR_DEATH, size: 'large' },
         });
         this.handlePlayerDeath();
+      };
+      w.__tallowmark.triggerTrap = (kind) => {
+        // Spawn a trap of the requested kind on the player's tile (revealed)
+        // and immediately fire it. Lets QA test all trap effects without
+        // RNG-walking around the dungeon hoping to find one.
+        const requested: 'spike' | 'gas' | 'alarm' = kind ?? 'spike';
+        const trap = { pos: { ...this.player.pos }, kind: requested, revealed: true };
+        this.runState.traps.push(trap);
+        this.placeTrapSprite(trap);
+        this.handleTrapStep();
+        this.refreshHud();
+      };
+      w.__tallowmark.applyStatus = (id, turns) => {
+        applyStatusTo(this.runState.activeStatuses, id, turns ?? 5);
+        this.log(`(dev) applied ${id} ×${turns ?? 5}`, 'discovery');
+        this.refreshHud();
+      };
+      w.__tallowmark.giveItem = (defId, count) => {
+        const def = getItemDef(defId);
+        if (!def) {
+          this.log(`(dev) unknown item def: ${defId}`, 'danger');
+          return;
+        }
+        for (let i = 0; i < (count ?? 1); i++) {
+          const existing = def.stackable
+            ? this.runState.inventory.find((s) => s.defId === def.id)
+            : null;
+          if (existing) existing.count += 1;
+          else this.runState.inventory.push({ defId: def.id, count: 1 });
+        }
+        this.log(`(dev) +${count ?? 1} ${def.trueName}`, 'discovery');
       };
     }
     void COLORS;
@@ -367,6 +426,11 @@ export class DungeonScene extends Phaser.Scene {
     const cam = this.cameras.main;
     cam.setBounds(0, 0, worldW, worldH);
     cam.startFollow(this.playerSprite, true, 0.15, 0.15);
+    // Deadzone: the camera only moves when the player approaches the edge of
+    // a central rectangle. Reduces viewport sloshing during auto-path (QA-v5
+    // perceived this as "camera centres on clicked tiles" — actually it's
+    // tracking the player who's walking to the click). 60% of viewport.
+    cam.setDeadzone(GAME_WIDTH * 0.6, GAME_HEIGHT * 0.6);
     cam.setBackgroundColor(COLORS.bg);
   }
 
