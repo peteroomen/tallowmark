@@ -62,4 +62,12 @@ export const ASSET_KEYS = {
     sfxHit: 'sfx-hit',
     sfxDeath: 'sfx-death',
   },
+  /**
+   * Tiled map files (.tmj) loaded as Phaser tilemapTiledJSON. Iter-3 stage 1
+   * substrate; the in-house painter (`src/editor/`) stays as a dev-only
+   * fallback during the migration.
+   */
+  maps: {
+    town: 'tilemap-town',
+  },
 } as const;

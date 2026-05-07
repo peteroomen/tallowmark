@@ -100,7 +100,16 @@ export class TownScene extends Phaser.Scene {
     this.ensureLayers(this.mapData);
     this.editor = new MapEditor(this.mapData);
 
-    this.drawTerrain();
+    // Iter-3 stage 1: try the Tiled tilemap path first. If the loader
+    // succeeded (key present in cache), render via Phaser's tilemap API
+    // and skip the in-house drawTerrain. Otherwise fall back to the
+    // legacy renderer that the in-house painter has been building against.
+    // Stage 2 will author the full town in Tiled and retire the fallback.
+    if (this.cache.tilemap.exists(ASSET_KEYS.maps.town)) {
+      this.drawTerrainTiled();
+    } else {
+      this.drawTerrain();
+    }
     this.drawLake();
     for (const b of BUILDINGS) this.drawBuilding(b);
     this.drawDungeonEntrance();
@@ -169,6 +178,39 @@ export class TownScene extends Phaser.Scene {
         height: map.height,
         data: new Array(map.width * map.height).fill(EMPTY_TILE),
       });
+    }
+  }
+
+  /**
+   * Iter-3 stage 1 — Tiled-rendered terrain. Replaces drawTerrain when a
+   * Phaser-loaded .tmj is in cache. Each tile layer becomes a Phaser
+   * TilemapLayer; the renderer walks the engine's optimised batch path
+   * instead of `add.image` per tile.
+   *
+   * Currently renders the minimal stage-1 town.tmj (grass + road) at the
+   * standard render scale. Stage 2 will author the full town with 3-tier
+   * buildings + decoration layers via Tiled.
+   *
+   * Note: this bypasses the in-house MapData/MapStore — the dev painter
+   * (F8) keeps editing the legacy MapData but its changes are invisible
+   * while the Tiled path is active. Per the iter-3 plan, the painter is
+   * being retired anyway; stage 2 finishes the migration.
+   */
+  private drawTerrainTiled(): void {
+    const map = this.make.tilemap({ key: ASSET_KEYS.maps.town });
+    // The .tmj references the rpg.tsj tileset by path. Phaser's tilemap
+    // loader resolved it; we just need to bind the texture key.
+    const tileset = map.addTilesetImage('rpg', ASSET_KEYS.sprites.rpg);
+    if (!tileset) {
+      // Tileset binding failed — bail to the legacy renderer.
+      this.drawTerrain();
+      return;
+    }
+    for (const layerData of map.layers) {
+      const layer = map.createLayer(layerData.name, tileset, 0, 0);
+      if (!layer) continue;
+      layer.setScale(RENDER_SCALE);
+      layer.setDepth(LAYER_DEPTHS[layerData.name] ?? 0);
     }
   }
 

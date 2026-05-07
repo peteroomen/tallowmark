@@ -33,6 +33,13 @@ export class BootScene extends Phaser.Scene {
     this.load.audio(ASSET_KEYS.audio.sfxStep, 'assets/audio/sfx_step.wav');
     this.load.audio(ASSET_KEYS.audio.sfxHit, 'assets/audio/sfx_hit.wav');
     this.load.audio(ASSET_KEYS.audio.sfxDeath, 'assets/audio/sfx_death.wav');
+
+    // Iter-3 stage 1: load the Tiled-format town map (.tmj). Phaser fetches
+    // the file and the tileset (.tsj) it references. Currently a minimal
+    // grass + horizontal road map; stage 2 authors the full town in Tiled
+    // with 3-tier buildings. The in-house painter stays as a dev-only
+    // fallback during the migration.
+    this.load.tilemapTiledJSON(ASSET_KEYS.maps.town, 'assets/maps/town.tmj');
   }
 
   create(): void {
