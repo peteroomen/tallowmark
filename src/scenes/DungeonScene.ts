@@ -149,6 +149,11 @@ export class DungeonScene extends Phaser.Scene {
 
   /** Window-level keydown handler (QA workaround for physical '.' key). */
   private windowKeyHandler?: (e: KeyboardEvent) => void;
+
+  /** Has the player heard the "distant echoes" rumble on this floor yet? */
+  private rumbleHeard = false;
+  /** Total walkable tiles on the current floor — for explored-% calc. */
+  private walkableTileCount = 0;
   /** Game event bus — combat / status / item code emits, UI subscribes. */
   private bus = new GameEventBus();
 
@@ -205,6 +210,7 @@ export class DungeonScene extends Phaser.Scene {
     for (const s of this.trapSprites.values()) s.destroy();
     this.trapSprites.clear();
     this.searchBoost = false;
+    this.rumbleHeard = false;
     if ((data.resume || data.descend) && services.save.loadRun()) {
       this.runState = services.save.loadRun()!;
     } else {
@@ -221,6 +227,21 @@ export class DungeonScene extends Phaser.Scene {
         Wayfarer,
         startingKit,
       );
+      // Drain pending statuses queued by town actions (e.g. Inn rest) into
+      // the new run, then clear. Lets the player carry a buff from town →
+      // dungeon without a run-state-pre-existing chicken-and-egg problem.
+      const pending = services.persistent.pendingStatuses;
+      if (pending && pending.length > 0) {
+        for (const s of pending) {
+          this.runState.activeStatuses.push({
+            id: s.id as StatusId,
+            turnsRemaining: s.turnsRemaining,
+          });
+        }
+        services.setPersistent((p) => {
+          p.pendingStatuses = [];
+        });
+      }
     }
 
     // Per-floor RNG: same base seed XOR the floor number so each floor is
@@ -261,6 +282,15 @@ export class DungeonScene extends Phaser.Scene {
     }
 
     this.player = new Player(this.runState.playerPos, { ...this.runState.player });
+
+    // Cache total walkable-tile count for the explored-% calc that drives
+    // the 60%-explored stairs auto-reveal on the minimap.
+    this.walkableTileCount = 0;
+    for (let y = 0; y < this.dungeon.tiles.height; y++) {
+      for (let x = 0; x < this.dungeon.tiles.width; x++) {
+        if (this.isWalkable(x, y)) this.walkableTileCount += 1;
+      }
+    }
 
     this.spawnEnemies();
     this.spawnItems();
@@ -1265,6 +1295,7 @@ export class DungeonScene extends Phaser.Scene {
     this.cleanupDeadEnemies();
     this.runState.player = { ...this.player.stats };
     this.recomputeFov();
+    this.checkStairsRumble();
     // exploredTiles is updated inside recomputeFov; persist it on the run.
     this.runState.exploredTiles = Array.from(this.exploredTiles);
     getServices(this).save.saveRun(this.runState);
@@ -1273,6 +1304,18 @@ export class DungeonScene extends Phaser.Scene {
     if (!this.player.alive) {
       this.handlePlayerDeath();
     }
+  }
+
+  /**
+   * #6B per QA closeout: one-time atmospheric hint when the player is
+   * within Chebyshev-6 of stairs-down. Pure flavour — doesn't reveal
+   * direction or distance, just signals proximity. Resets per floor.
+   */
+  private checkStairsRumble(): void {
+    if (this.rumbleHeard) return;
+    if (chebyshev(this.player.pos, this.dungeon.stairsDown) > 6) return;
+    this.rumbleHeard = true;
+    this.log('You hear faint echoes from below.', 'story');
   }
 
   /** Re-render the minimap from current dungeon state. Cheap. */
@@ -1284,6 +1327,14 @@ export class DungeonScene extends Phaser.Scene {
       const ty = Math.floor(ghost.y / TILE_SIZE);
       ghosts.push({ x: tx, y: ty });
     }
+    // #6C per QA closeout: at ≥ 60% of walkable tiles explored, force-reveal
+    // the stairs-down on the minimap (only — fog mask still respects the
+    // strict explored set). Encourages thorough play without forcing the
+    // player to walk every corridor to find the descent.
+    const exploredPct =
+      this.walkableTileCount > 0 ? this.exploredTiles.size / this.walkableTileCount : 0;
+    const revealedStairsDown = exploredPct >= 0.6 ? this.dungeon.stairsDown : undefined;
+
     this.minimap.render({
       tiles: this.dungeon.tiles,
       visibleKeys: this.visibleTiles,
@@ -1293,6 +1344,7 @@ export class DungeonScene extends Phaser.Scene {
       enemyGhosts: ghosts,
       items: this.items.map((i) => ({ pos: i.pos })),
       revealedTraps: this.runState.traps.filter((t) => t.revealed).map((t) => ({ pos: t.pos })),
+      revealedStairsDown,
     });
   }
 

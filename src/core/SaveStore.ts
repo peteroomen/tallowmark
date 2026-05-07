@@ -101,6 +101,11 @@ export class SaveStore {
         ? p.unlockedItemPool.filter((s) => typeof s === 'string')
         : [],
       townUpgrades: p.townUpgrades && typeof p.townUpgrades === 'object' ? { ...p.townUpgrades } : {},
+      pendingStatuses: Array.isArray(p.pendingStatuses)
+        ? p.pendingStatuses.filter(
+            (s) => !!s && typeof s.id === 'string' && typeof s.turnsRemaining === 'number',
+          )
+        : [],
       audio: {
         master: clamp01(p.audio?.master, def.audio.master),
         music: clamp01(p.audio?.music, def.audio.music),

@@ -91,6 +91,8 @@ export class Minimap extends Phaser.GameObjects.Container {
     enemyGhosts: ReadonlyArray<Point>;
     items: ReadonlyArray<{ pos: Point }>;
     revealedTraps: ReadonlyArray<{ pos: Point }>;
+    /** Force-shown stairs-down point — used by the 60%-explored auto-reveal. */
+    revealedStairsDown?: Point;
   }): void {
     const g = this.graphics;
     const px = this.pxPerTile;
@@ -123,6 +125,13 @@ export class Minimap extends Phaser.GameObjects.Container {
     for (const t of opts.revealedTraps) {
       g.fillStyle(COLOR_TRAP, 1);
       g.fillRect(t.pos.x * px, t.pos.y * px, px, px);
+    }
+    // Force-revealed stairs-down (60%-explored auto-reveal). Pulses subtly
+    // — drawn as a slightly-larger cyan dot so it reads as a destination
+    // hint, not the same weight as a normally-explored stair tile.
+    if (opts.revealedStairsDown && !opts.exploredKeys.has(`${opts.revealedStairsDown.x},${opts.revealedStairsDown.y}`)) {
+      g.fillStyle(COLOR_STAIR_DOWN, 0.85);
+      g.fillRect(opts.revealedStairsDown.x * px - 1, opts.revealedStairsDown.y * px - 1, px + 2, px + 2);
     }
     // Enemy ghost markers (last-seen positions, semi-transparent).
     for (const ghost of opts.enemyGhosts) {

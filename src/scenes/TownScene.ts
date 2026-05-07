@@ -298,6 +298,59 @@ export class TownScene extends Phaser.Scene {
         fontStyle: 'bold',
       })
       .setOrigin(0.5, 1);
+
+    // QA closeout #7A: the Inn gets a clickable hit zone over its full
+    // footprint so the town has at least one mechanical interaction
+    // pre-iter-3. Other buildings stay scenery until iter-3 stage 5
+    // ships per-building interior scenes.
+    if (b.label === 'Inn') {
+      const zone = this.add
+        .zone(px + pw / 2, py + ph / 2, pw, ph)
+        .setOrigin(0.5)
+        .setInteractive({ useHandCursor: true });
+      zone.on('pointerup', () => this.openInnRest());
+    }
+  }
+
+  /**
+   * Inn rest dialog (iter-2 closeout polish). Cost: 5 embers. Effect: queue
+   * a Healing regen status (10 turns) on PersistentState.pendingStatuses,
+   * which DungeonScene drains into the next fresh run on entry.
+   *
+   * If the player can't afford it, the dialog says so and confirm is a
+   * no-op. If they already have a pending rest, prevent stacking — one rest
+   * per descent, deliberately.
+   */
+  private openInnRest(): void {
+    const services = getServices(this);
+    const cost = 5;
+    const haveRest = services.persistent.pendingStatuses.some((s) => s.id === 'healing');
+    const canAfford = services.persistent.resources.embers >= cost;
+    let body: string;
+    let onConfirm: (() => void) | undefined;
+    let confirmText = 'Rest';
+    if (haveRest) {
+      body = 'You are already rested. The next descent carries the Innkeeper\'s warmth.';
+      confirmText = 'Hm.';
+    } else if (!canAfford) {
+      body = `The Innkeeper holds out a hand. "Five embers for a bunk."\n\nYou have ${services.persistent.resources.embers}.`;
+      confirmText = 'Maybe later';
+    } else {
+      body = `Pay 5 Embers for a bunk and a meal. Your next descent begins with 10 turns of slow healing.\n\n(You have ${services.persistent.resources.embers} embers.)`;
+      onConfirm = () => {
+        services.setPersistent((s) => {
+          s.resources.embers -= cost;
+          s.pendingStatuses.push({ id: 'healing', turnsRemaining: 10 });
+        });
+      };
+    }
+    this.scene.launch(SCENE_KEYS.ConfirmDialog, {
+      title: 'The Tallowed Inn',
+      body,
+      confirmText,
+      cancelText: haveRest || !canAfford ? 'Close' : 'Not yet',
+      onConfirm,
+    });
   }
 
   private drawDungeonEntrance(): void {
