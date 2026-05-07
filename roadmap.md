@@ -120,7 +120,8 @@ Second enemy archetype — teaches the player to use line-of-sight tactically.
 - Stairs-up only on floor 1 — climbing exits to town with banked Embers. Deeper floors are descent-only.
 - Embers reward scales with deepest floor reached.
 - **Bosses deferred** to iter 3+. Floor 10 just shows a "you've reached the deepest known level" wrap screen for now.
-- **Floor descriptor** picked at gen time from a small pool — `Quiet` (fewer enemies, more loot, one Alarm trap that turns it into a panic), `Cramped` (corridor-heavy, archers a real threat), `Open` (large rooms, kiting works, ambushes can't), `Trapped` (double trap density, food is plentiful), `Hungry` (no food drops, descend or die). Surfaces in the floor entry log + the floor name in the HUD ("Floor 4 — *Open*"). Pulled from iter-5 polish per design memo: cheap to ship now, gives every floor an identity before biomes land.
+- **Floor descriptor** picked at gen time from a small pool — `Quiet` (fewer enemies, more loot, one Alarm trap that turns it into a panic), `Cramped` (corridor-heavy, archers a real threat), `Open` (large rooms, kiting works, ambushes can't), `Trapped` (double trap density, food is plentiful), `Hungry` (no food drops, descend or die). Surfaces in the floor entry log + the floor name in the HUD ("Floor 4 — *Open*").
+- **Floor descriptor title card** (per refinement-002 §E) — 2-second fade-in card on floor entry: 48px serif text "Floor 4" with italic descriptor below, centred, depth 950 (above floating text, below pause overlay). Timing: 200 ms fade-in / 1400 ms hold / 400 ms fade-out. The card is the *moment*; the HUD label and log are the persistent reference.
 
 **Stage 11 — The Wayfarer** (½ day)
 Default starting class. Not a true class system — that's iter 4. This is naming + stats + starting kit so the character sheet shows a coherent identity.
@@ -139,7 +140,21 @@ The iter-2 systems work. Stage 12 is where they start to *feel*. All five additi
 - **48-px touch target floor** — `CLAUDE.md` updated from `≥ 32 px` to `≥ 48 px (= one tile)`. Existing HUD buttons (currently 36) grow to 48. Matches Apple HIG (44) / Material (48), and matches the natural unit of the world.
 - **Tap distinction (adjacent vs distant)** — current click handler always invokes `findPath`; needs a one-line check so `chebyshev(player, target) === 1` skips pathfinding and fires `tryStep(target)` directly. One rule, two behaviours, zero ambiguity.
 - **Floating-text HUD keepout** — spec a 64-px clipping border in the floating-text spawner so damage numbers never render under HUD chrome regardless of z-depth. Clipping, not just z-order.
-- **Manual test pass + closeout doc** as originally planned.
+- **Status icon grammar refactor** (per refinement-002 §B) — three-field language: **Glyph** encodes the *concept* (cross / drop / skull / swirl / shield) tied to category not flavour, **Tint** encodes valence (green buff, red debuff, blue control, yellow neutral) matching log-line palette, **Frame** encodes kind (solid = buff, dashed = debuff, double-line = control) as colourblind-safe duplicate. Bleed and Poisoned share the drop glyph; tint + frame distinguish. Pre-empts the iter-4 status expansion (Burning / Frozen / Stunned / Charmed / Slow / Strength / Weakness — 7 more) needing a re-pass.
+- **Three-state status countdown** — ≥4 turns: numeral steady. 2-3 turns: numeral pulses subtly (alpha 1.0 → 0.7, 800 ms cycle). 1 turn: numeral red, frame flashes once per turn-tick (240 ms alpha 1 → 0.4 → 1). The 1-turn flash is the only motion in the HUD — earned, and exactly when the player needs the count.
+- **Animation timing spec** (per refinement-002 §J) — concrete ms numbers locked: actor step 110 ms easeOutQuad (current), bump-attack 70 ms out + 70 ms back with 6px overshoot, damage float 600 ms (current), heal float 800 ms (slower = lingering goodness), status apply flash 180 ms single white pulse, trap reveal 200 ms scale 1.2→1, door open 180 ms, stair descend 350 + 50 + 350 ms (the hold matters), Ledger card cascade 80 ms × 4, Threshold descent button 0 ms (immediate; hesitation reads as the game questioning you). **No screen shake** — turn-based games don't earn it.
+- **Gas cloud animation upgrade** (per refinement-002 §E) — replace the current 600 ms green flash (reads as "buggy") with a 4-stage tween on a single sprite: tight cluster at 0 ms (alpha 0.9, scale 0.7) → expanded at 120 ms (alpha 0.95, scale 1.0) → drifting at 240 ms (alpha 0.85, scale 1.05, +2px y) → dissipating at 360 ms (alpha 0.5, scale 1.1, +4px y), then linger as a static reduced-alpha sprite for the gas duration. Snappy first 120 ms, lingering tail = "this tile is still poisonous".
+- **Minimap MVP — bottom-right HUD widget.** Persistent dungeon minimap, ~120×80 px, in the bottom-right corner above the Action Wheel anchor zone (so the wheel opens INSIDE the minimap area when triggered for self — minimap fades to alpha 0.3 while wheel is open). Each dungeon tile renders as 3×3 px:
+  - **Walls** dark `#2a2218` ; **floors** `#6a6470` (current rect colours).
+  - **Visible tiles** rendered at full alpha; **explored-but-not-visible** at alpha 0.5; **unexplored** not rendered.
+  - **Player** as a 3×3 amber dot `#d4a24c`, blinking once per turn.
+  - **Stairs** as a 3×3 cyan dot `#4a9ed4`.
+  - **Enemies** in current FoV as 3×3 red dots `#d44a4a`. Ghost markers (last-seen out of FoV) as semi-transparent red.
+  - **Items** as 3×3 yellow dots `#d4a24c` (matches discovery tone — "things to find").
+  - **Revealed traps** as small `×` glyph in trap colour (red/green/amber per kind).
+  - **Click on minimap** → camera pans to that location (read-only, doesn't path-find — clicking the world tile still does that).
+  - **Toggle key** `m` to expand to ~360×240 px overlay. ESC or `m` again to collapse.
+- **Minimap is the bridge to the iter-7 world map.** Same widget shape; different content. Iter-7 swaps the dungeon-tile renderer for a town-tile + dungeon-entrance + settlement-pin renderer when the player is on the world-map view. Same 120×80 corner widget, same toggle key.
 
 ---
 
@@ -174,6 +189,32 @@ The buildings in iter 2 are intentionally painted rectangles. Once Tiled and aut
 
 > **Why the 3-tier framing matters:** without visible growth the metaprogression feels bookkept, not earned. Authoring 3 exterior variants per building once in Tiled is cheap; the *renderer* gates on `PersistentState` so the right variant shows automatically. Without this, the town becomes a static backdrop that happened to be authored in Tiled.
 
+**Locked-in spec from refinement-002:**
+
+- **Footprint convention.** Every building occupies a **3W × 3H** rectangle on the town grid, door on the *south face, centre tile*. Inn is the deliberate exception — 3×4. Variation is *vertical* (roof shape, chimney count, window count) and *theming* (sign, colour), never footprint. The uniformity is what makes iter-7 building additions a Tiled edit not a TownScene rewrite.
+- **What makes buildings readable from across the map without text labels** — ranked: (1) roof colour: red tile (Apothecary) / slate grey (Blacksmith) / brown thatch (Inn) / no roof, stone arch (Shrine); (2) smoke: none / double / single thatch-vent / none; (3) footprint: 3×3 / 3×3 / **3×4** / 3×3 (Inn's extra row is the strongest silhouette differentiator); (4) glow colour at T2: green / orange / yellow / cyan. Don't rely on signs — signs are confirmation, not identification.
+- **Shrine T1-only.** Shrine has no Founder to rescue — ships at T1 day 1 (T0 doesn't exist for it). Stone arch reads *open to sky*; reads inverse to the others.
+- **Locked-but-visible visual language** (per refinement-002 §L) — primary: **mist + boarding**, with desaturation reserved for accessibility (colourblind / motion-sensitive opt-out). Two cues: physical block (boarded planks / chained gate / bricked wall — diegetic blocker form depends on what's blocked) AND mist overlay (sub-tile drifting fog, alpha 0.35, slow horizontal drift 8 px/sec, only on the locked tile/building/region). Together: *this is a place. It's not for you yet. You can see why.* Density scales with how distant the unlock is — day-1 secret door = thin mist; day-1 Wizard's Tower = thick fog with barely-readable silhouette. Players learn: *more fog = farther unlock*.
+- **Tiled layer conventions** for `town.tmj`:
+  - `terrain` — grass, paths, water, base ground
+  - `terrain_alt` — alt-floor scatter (1-in-8 grass variants, deterministic per seed)
+  - `decoration_low` — bushes, small rocks, beneath actor depth
+  - `building_exterior_T0` / `_T1` / `_T2` — three variants per building; renderer picks based on `PersistentState[buildingId].tier`
+  - `decoration_high` — tall trees, above actor depth, alpha 0.7 when actor passes behind
+  - `mist_locked` — fog overlays for locked content
+  - `objects` — NPCs, doors, triggers, signs
+  - `collision` — explicit walkable mask for ambiguous tiles
+- **Object naming grammar** (parser splits on `:`, dispatches by `kind`): `kind:id[:modifier]`. Examples: `door:apothecary_main`, `door:secret_passage:feat_identify_100`, `npc:wandering_merchant:renown_3`, `trigger:dungeon_arch_2:renown_3`, `trigger:world_map_portal:renown_7`. Adding a new kind in iter 7 = add one parser branch + one renderer.
+- **Door schema generalisation** — every door is JSON `{ type, id, target_scene, lock_condition, locked_visual }`. Renderer reads `lock_condition`: `null` + Founder rescued → render T1/T2 door; `null` + Founder not rescued → render T0 boarded; condition set + unmet → render `locked_visual` blocker + mist + Examine sheet on interaction; condition set + met → normal door. **One door schema, all gating.** Iter-7 secret doors hang off this without changes.
+- **Reserve corner grid zones for iter-7 expansion** (per refinement-002 §N) — the iter-2 town is 24×16. Earmark these zones BEFORE any building lands, leave grass:
+  - **NW (cols 0-3, rows 0-3)** — Wizard's Tower at Renown V (visible as silhouette through dense fog from day 1)
+  - **NE (cols 20-23, rows 0-3)** — festival stage at Renown VIII
+  - **SW (cols 0-3, rows 12-15)** — walled garden at Renown II
+  - **SE (cols 20-23, rows 12-15)** — second dungeon arch at Renown III
+  - **South-centre (col 12, row 13)** — leave free for the world-map portal at Renown VII
+- **Move dungeon arch off south-centre** to row 13 col 14 (south-east of centre) so the iter-7 world-map portal has a home.
+- **What NOT to do** — do not hardcode building IDs in scene code; everything from object names. Do not inline lock conditions in renderer; they live on the object, renderer asks `LockCheck.isMet(condition, state)`. Do not size the town for what we have — size for what we'll have. The 24×16 already accounts for this if corner zones are honoured.
+
 **Stage 3 — Dungeon visual pass** (1–1.5 days)
 The dungeon currently renders as palette-tinted rectangles — `0x32323a` walls, `0x6a6470` floors. That was the right call in iter 1/2 (focus on systems, defer art), but it ages badly the moment the rest of the world has real tiles. Replace the rect renderer with a proper tileset using `kenney_roguelike-caves-dungeons` (the `roguelikeDungeon_transparent.png` sheet — same 16×16 + 1px gutter Kenney standard, 29×18 frames).
 
@@ -185,6 +226,19 @@ The dungeon currently renders as palette-tinted rectangles — `0x32323a` walls,
 - **No data-layer changes.** `TileKind` stays the same — only the renderer in `DungeonScene.drawTiles` swaps from `add.rectangle` to `add.image` with frame lookups via the auto-tile pass.
 
 > **Why this lives here, not earlier:** the dungeon's rectangle look is *deliberately* placeholder — every iter-2 stage 4–11 issue is a system bug or a UX issue, not a "the floor isn't pretty" issue. Pulling the dungeon visual pass into iter 2 would cost a day and obscure the actual feedback signal (does the system work?). Once Tiled is in (iter-3 stage 1), painting and auto-tiling the dungeon is cheap.
+
+**Locked-in spec from refinement-002 §E:**
+
+- **Frame role table** is the contract — verify exact frames in F9 before commit, but lock the *roles* now so iter-7 biomes reuse them via palette swap. Roles: wall interior / wall corner NE+NW / wall side L+R / floor primary / floor alt-1 (hairline crack) / floor alt-2 (small puddle) / floor alt-3 (bone fragment) / stairs down+up / door closed+open / chest closed+open. Working picks favour row 0-1 for walls, row 6-7 for floors, row 4 for stairs, rows 3 + 11 for doors/chests.
+- **Alt-floor scatter pattern** — deterministic per-tile hash `(x*73 + y*149) % 256`. Map: 0-223 → primary (87.5% / 7-in-8); 224-239 → alt-1 (6.25%); 240-247 → alt-2 (3.1%); 248-255 → alt-3 (3.1%). Same shape as the town v3 grass-alt scatter — reproducible runs hold.
+- **Trap visual treatment** —
+  - **Hidden (unrevealed)**: NO visual change. Floor renders as normal floor. The whole point of perception rolls is that you don't see them yet.
+  - **Spike (revealed)**: small `+` of metal points overlaid, alpha 0.85, pulse 0.85 → 0.7 over 1200 ms.
+  - **Gas (revealed)**: pressure-plate disc inset into floor, sigil-engraved, static.
+  - **Alarm (revealed)**: brass plate with faint runic ring, 1px white outline once every 4s in idle (subliminal).
+- **Trap reveal animation** — 200 ms scale 1.2 → 1, alpha 0 → 1 (easeOutQuad), fires alongside the existing `!Spotted!` floating text. The scale-down is the cue ("locking in"). Currently the plan tweens the floating text only; tween the trap sprite too.
+- **Iter-7 biome differentiation = palette swap on the same role table.** Sunken Mines: desat blue + ore-green + water tile alpha 0.7 ripple anim. Catacombs: bone white + deep purple + bone debris ×4 + sarcophagi as fixtures. Glass Halls: black + cyan rim + mirror tiles reflecting adjacent floor at 0.4 alpha. Authoring effort per biome ≈ ½ day if iter-3's role table lands cleanly. **The role table is the contract.**
+- **Minimap polish pass.** The MVP shipped iter-2 stage 12 used the rect colours. Now that real tiles exist, the minimap pixel colour samples from the actual tile palette so each biome's minimap looks distinctly biome-coloured (caves grey, mines desat-blue, catacombs bone-white, glass-halls black-cyan). Door / stairs / chest get their own glyphs. **No new minimap features** — just colour fidelity and biome-awareness on the existing widget.
 
 **Stage 4 — Action Wheel + verb resolver** (2–3 days)
 The current `u`/`d`/`s`/`q` verb-key stack works for desktop but won't survive iter 4's spell/throw/equip additions, and a phone has none of the keys. Replace with a **contextual radial Action Wheel** as the discoverability layer, with keyboard bindings as a peer (not subordinate) layer.
@@ -200,6 +254,42 @@ The current `u`/`d`/`s`/`q` verb-key stack works for desktop but won't survive i
 - **Removes** the wait/search dual-purpose-button conflict from iter 2 stage 8 — Wait and Search become two adjacent slots on the self-target wheel.
 
 > **Estimate revisited.** Designer asked ½ day; engineering says 2–3 days. The radial menu is a new component (Phaser has no primitive), the gesture layer needs to coexist with the existing click-to-path without misfires, and the resolver lift is non-trivial. Worth doing right because every iter-4+ verb hangs off this.
+
+**Locked-in spec from refinement-002 §K:**
+
+- **6 fixed clock-face slots, always 6** even if only 3 populated — empty slots are dimmed (alpha 0.3, no glyph). Spatial memory: muscle-memory says "Use is at 12 o'clock for items in bag," always. Keyboard `1`-`6` always maps to clock-face slots regardless of what's populated.
+- **Slot size 56 px** (slightly above the 48px touch floor — the wheel is a *moment*, not chrome). Centre dead-zone 32 px. Total diameter ~180 px — fits a 5-inch landscape phone, clamps fine portrait.
+- **Anchor rules**:
+  - Long-press / right-click on target → wheel anchors at target sprite's centre with 12 px upward bias (target stays visible below the wheel)
+  - Space / Action button (self) → bottom-right HUD corner, growing inward (natural thumb position)
+  - Direct verb key (`u`, `q`, etc.) → **wheel does NOT appear**; resolver fires immediately. Wheel is the discovery surface only.
+- **Off-screen target handling** — clamp wheel to viewport with 16 px margin, draw a 2 px line from wheel centre back to target sprite (anchor leader). Don't rotate the radial — slot order stays canonical.
+- **The 12-o'clock slot is always the primary action for the target type** — players learn "long-press, top button = the obvious thing".
+- **Per-target verb tables** (resolver dispatches):
+
+  | Target | Slot 12 | Slot 2 | Slot 4 | Slot 6 | Slot 8 | Slot 10 |
+  |---|---|---|---|---|---|---|
+  | Self | Wait | Search | Inventory | Character | (empty) | (empty) |
+  | Floor tile | Walk-to | Search | Examine | (empty) | (empty) | (empty) |
+  | Enemy | Attack | Examine | (empty) | (empty) | (empty) | Cast (iter 4) |
+  | Item on floor | Pick up | Examine | Step over | (empty) | (empty) | (empty) |
+  | Item in bag | Use | Drop | Examine | (empty) | (empty) | (empty) |
+  | Stairs | Descend | Climb | Examine | (empty) | (empty) | (empty) |
+  | Trap (revealed) | Step over | Disarm (iter 4) | Examine | (empty) | (empty) | (empty) |
+
+- **Slot icon language** — verb glyphs: Use (target-aware uses item icon), Drop (down-arrow into pouch), Examine (magnifier), Search (magnifier + sparkle), Wait (hourglass), Cast (open palm + spark), Pick up (up-arrow into pouch), Attack (sword), Walk-to (footprints), Descend/Climb (stair glyph), Step over (tiptoe), Disarm (wrench).
+- **Empty-state** — if resolver returns zero verbs (rare; typically only walls): wheel doesn't open. Small `−` indicator pulses once at the target for 200 ms. Better than opening an empty wheel.
+- **Dismiss — three peers**: tap-out (touch), `Esc` (keyboard), re-press the trigger (cancel). No "X" close button — the wheel is light, doesn't earn chrome.
+- **Touch + mouse + keyboard parity in one component**:
+
+  | Input | Open | Pick slot | Dismiss |
+  |---|---|---|---|
+  | Touch | long-press 350 ms | tap slot | tap-out |
+  | Mouse | right-click | click slot | click-out |
+  | Keyboard | Space (self) or Tab to target | 1-6 | Esc |
+
+- **Animation** — open: 120 ms scale 0.8 → 1, alpha 0 → 1, easeOutBack (slight overshoot, settles). Close: 80 ms scale 1 → 0.9, alpha 1 → 0, easeInQuad (faster than open).
+- **Architectural rule** — the resolver is the prize, not the wheel. **Do not** let the wheel logic encode "what's a valid verb for an item." That belongs in `actions/Resolver.ts`. The wheel is dumb; it asks the resolver and renders the answer. This is what makes adding the iter-4 Cast verb a one-line resolver change, not a hunt through the wheel component.
 
 **Stage 5 — Found Founders system + Examine bottom-sheet + identification visual language** (2–3 days) — see below.
 
@@ -237,6 +327,22 @@ A generic bottom-sheet info panel for any examinable target — items, NPCs, tra
 - NPC examine — Founder dialogue, shop preview, town gossip
 
 One generic component (`ui/ExamineSheet.ts`) parameterised by content. Slides up from the bottom edge, dismissable by tap-out / ESC. Solves the "where do tooltips live" question raised in the brief without requiring a separate tooltip system.
+
+**Locked-content teaser format** (per refinement-002 §L) — the Examine sheet for a locked target shows: a `???` heading, a ~15-word flavour teaser ("Something tall. Something quiet. Stones older than the town."), and a single field "Locked: Renown V". The teaser is *flavour, not info* — never spoils the unlock. The lock condition is the only useful field.
+
+#### Generic interior layout pattern (lands with Founders)
+Per refinement-002 §D — author once as a Tiled template; each building is the template with a palette swap. **10×8 grid**, exit tile north-centre (cols 4-5, row 0), NPC stand position south-centre (col 4, row 6), shop counter east-side (cols 6-7, rows 4-5), decoration density target ~30% of non-wall non-fixture tiles (higher = cluttered, lower = empty stage; 30% reads as "lived in"). Exit is north because the player arrived from the south (exterior door faces south); walking north out of the shop is the natural reverse.
+
+Per-building theming differs only in palette + decoration set, never layout:
+
+| Building | Wall | Floor | Counter | Decoration set |
+|---|---|---|---|---|
+| Apothecary | plaster (warm cream) | wood plank | wood, herbs piled | cauldron · hanging herbs · bottle shelves · mortar+pestle · drying rack |
+| Blacksmith | rough stone (cool grey) | flagstone | wood, soot-stained | anvil (2×1) · forge (2×2 — counter IS the forge) · water barrel · weapon racks · coal pile |
+| Inn | wood plank | wood plank, alt = rug tile | bar (wood + tankards) | tables (2×2) ×2 · benches · hearth (2×1, lit) · barrels · candle on each table |
+| Shrine | stone block (light) | polished stone | stone altar (replaces counter) | brazier (lit cyan) · kneeler benches · rune circle overlays · scroll racks |
+
+Shrine exception: counter IS the altar (not wood). Decoration budget drops to ~15% — sparseness *is* the theme. Adding the iter-7 Wizard's Tower interior = copy the template, swap the palette, ship. The interior is content, not engineering — that's the prize.
 
 #### Death summary expanded → Ledger (already shipped iter-2 stage 12)
 The four-card Ledger lands in iter-2 closeout. Iter 3 extends it with the new "what's new" entries that the Founders system enables:
@@ -302,6 +408,7 @@ Found weapons gain 1–3 rune sockets. Runes (already 1 in the iter-2 manifest, 
 **Goal:** runs feel different from each other. Build variety arrives.
 
 - **Threshold Goals + Feats.** The Threshold screen (shipped iter-2 stage 12 as a one-screen world card) gains an optional Goal layer here, since Goals + Feats are the same shape — a list of objectives, scoring, reward modifiers, persistence of best results. Goals are short ("Reach floor 5", "Find the Apothecary", "Identify five items"); picking one bumps the Embers reward. Skipping is fine. Feats are long-lived ("Reach floor 5 without a melee weapon → unlock Mage"). Both consumed by the same `objectives/` data model; the UI surfaces them in the Threshold and the Ledger.
+- **Town-only Feats** (per refinement-002 coda #3) — a deliberate sub-class of Feats that complete *without descending*: befriend an NPC across N visits; attend a festival (iter-7); chat with every Founder in a single town visit; read every Town Board entry. The point: when the town becomes residence-scale at Renown VII+ (NPCs walking around, festivals firing), the player should sometimes *return to town and not descend*. Town has to support being a destination, not just a hub. Token budget: 4-6 town-only Feats land here, paving the way for iter-7's "town as destination" promise.
 - **Class blueprint system.** Iter 2's Wayfarer is the default; iter-4 unlocks three branching builds. Each is *data + a few overrides* on the same `Player` shape:
   - **Brigand** — high crit on full-HP enemies; starts with 2× Blinking Scroll. Plays around alpha strikes and disengages. Pairs with Leather armor.
   - **Acolyte** — cooldown-based "Mending" heal; higher perception (traps revealed sooner). Light combat, supports party / herself with status uptime.
@@ -348,21 +455,21 @@ Found weapons gain 1–3 rune sockets. Runes (already 1 in the iter-2 manifest, 
 **Goal:** Tallowmark stops being *"a town and a dungeon"* and becomes *"a world worth exploring"*. The metaprogression spine grows to support the long arc the design vision promises.
 
 #### Town Renown — the meta-progression spine
-The town has a numeric **Renown** level (0–10) driven by total Embers earned, Founders rescued, dungeons completed, and Feats unlocked. Each Renown tier unlocks something *visible in town*. Renown is not a stat to optimise — it's the diegetic counter that tracks player investment.
+The town has a numeric **Renown** level (0–10) driven by total Embers earned, Founders rescued, dungeons completed, and Feats unlocked. Each Renown tier unlocks something *visible in town*. Renown is not a stat to optimise — it's the diegetic counter that tracks player investment. Tiers carry **diegetic names** (Stranger / Familiar / Welcome / Trusted / Counted / Notable / Esteemed / Storied / Renowned / Legend / Mythwalker), not just numbers — players should think "I'm Counted" not "I'm Renown 4". Roman numerals everywhere the tier is surfaced (see "Renown surfacing" below).
 
-| Renown | Unlocks (in addition to all prior) |
-|---|---|
-| 0 | The 4 starting buildings + main dungeon entrance (current iter-3 baseline) |
-| 1 | First wandering NPC visits town periodically |
-| 2 | **Walled garden** behind the Inn opens — quest-NPC stand position, ambient |
-| 3 | **Second dungeon entrance** appears on the town map — the Sunken Mines |
-| 4 | **Catacombs** under the cemetery unlock — third dungeon, undead-themed |
-| 5 | **Wizard's Tower** opens in the corner — new building, new Founder slot |
-| 6 | Day/night cycle activates; certain NPCs only present in certain phases |
-| 7 | **A second settlement** appears on a world map (zoomed-out view) |
-| 8 | Festival system unlocks — periodic events change loot pool / shop prices |
-| 9 | **The Glass Halls** — fourth dungeon, illusion enemies, mirror puzzles |
-| 10 | Endgame area unlocks |
+| Renown | Tier name | Unlocks (in addition to all prior) |
+|---|---|---|
+| 0 | *Stranger* | The 4 starting buildings + main dungeon entrance (current iter-3 baseline) |
+| I | *Familiar* | First wandering NPC visits town periodically |
+| II | *Welcome* | **Walled garden** behind the Inn opens — quest-NPC stand position, ambient |
+| III | *Trusted* | **Second dungeon entrance** appears on the town map — the Sunken Mines |
+| IV | *Counted* | **Catacombs** under the cemetery unlock — third dungeon, undead-themed |
+| V | *Notable* | **Wizard's Tower** opens in the corner (visible as silhouette through dense fog from day 1) — new building, new Founder slot |
+| VI | *Esteemed* | Day/night cycle activates; certain NPCs only present in certain phases |
+| VII | *Storied* | **A second settlement** appears on a world map (zoomed-out view) |
+| VIII | *Renowned* | Festival system unlocks — periodic events change loot pool / shop prices |
+| IX | *Legend* | **The Glass Halls** — fourth dungeon, illusion enemies, mirror puzzles |
+| X | *Mythwalker* | Endgame area unlocks |
 
 #### Multiple dungeons
 Each new dungeon entrance is a distinct biome / item pool / enemy mix / Founder. They share the same tile-engine and run-loop, but feel like different games on the inside.
@@ -376,6 +483,29 @@ Each new dungeon entrance is a distinct biome / item pool / enemy mix / Founder.
 
 Each has its own seed family — a "Sunken Mines run" is meaningfully distinct from a "Caves run" and has its own depth track.
 
+#### Renown surfacing — three layers (per refinement-002 §M)
+The constraint: readable to a returning player after 30 days, invisible-but-felt to a new player mid-run. A HUD bar reads to both the same way; rules it out. Layered surface where each layer answers a different question:
+
+1. **The Town Status strip — at-a-glance reminder.** Single line at the top of TownScene shows current state. Add Renown as a small **Roman numeral** after the day count: `TALLOWMARK · DAY 14 · IV · 2 SHOPS OPEN · 47 EMBERS · NEW: Apothecary L2 — Frost Potions now drop`. Roman is invisible to a new player (looks date-ish), instantly readable to a returning one ("oh, IV — I was at III last time"). One character of HUD, two reads. Roman because it gives the town a *stately* feel — Tallowmark has Renown the way a city has a charter.
+2. **The Town Board — canonical check surface.** A physical bulletin board near the town centre (placed in the centre zone reserved iter-3). Tapping opens a parchment-style overlay with three panes: current Renown tier (name + numeral + paragraph of flavour), the next tier and what it unlocks, and the top 3 outstanding things you could do next (Founders to rescue, dungeons to beat, Feats close to completion). The Board is the *deliberate* way to check Renown — returning players go here first to remind themselves where they were.
+3. **Diegetic acknowledgement — the felt layer.** Things that change as Renown grows without any UI saying so:
+   - **NPC greetings shift.** Renown 0: "Hm." Renown IV: "Welcome back, friend." Renown VIII: "Mythwalker. Tea?" Same NPC, drifting tone. Players notice the *room got warmer*, not the line change.
+   - **Sky / lighting drift.** Renown 0-III neutral daylight; IV-VI late-afternoon golden tint (alpha 0.08 amber overlay on town only — keep dungeons untinted); VII+ banners flap, distant church bells once on town entry.
+   - **Ambient NPC count.** 0 wandering NPCs at Renown 0. +1 per tier from I. By VII the town has 7 wandering NPCs and the place feels alive.
+   - **Mist dissipation animation on unlock.** As Renown rises and unlocks happen, the §L mist on those tiles dissipates *visibly* on the next town entry — 1.5 sec, mist drifts off-screen. **The dissipation animation is THE moment** the player feels the unlock land.
+
+**Don't slap a Renown bar on the HUD.** The whole town is the bar.
+
+#### Town as destination, not just hub (per refinement-002 coda #3)
+At Renown VII+ the town becomes residence-scale: festivals, day/night, NPC schedules. The Threshold/Ledger pair (iter-2 stage 12) was framed around "a run begins, a run ends." That's still true — but at Renown VII+ the player might **return to town and not descend**. They might come back to attend a festival, talk to an NPC, check the Town Board, leave again *without a run*.
+
+**Practical implications, all enforceable as iter-7 acceptance criteria:**
+- The dungeon arch is NOT the only meaningful interaction in town. The Town Board, Founder dialogue, festival booths, walled garden quest-NPC, all exist as standalone destinations.
+- Town-only Feats (delivered iter-4) give "I came to town and didn't descend" objective texture.
+- The Threshold screen is dismissable without committing to a run — pressing Esc returns to town, and "leave town without descending" is a valid end-of-session state, not a soft fail.
+
+**Don't ship iter-7 with a town that punishes you for not descending.**
+
 #### Secret areas in town
 Hidden content gated behind:
 - **Locked doors** that open after specific Feats (the Apothecary's storeroom, after Identify-100-items)
@@ -383,7 +513,7 @@ Hidden content gated behind:
 - **Time-of-day gates** (a door that only opens at night, once the Renown-6 day/night cycle is live)
 - **NPC-trust gates** (a back room only opens after befriending an NPC across runs)
 
-The visual language for "locked but visible" content needs to be coherent — boarded? misty? colour-drained? See the design brief.
+Visual language for locked content is the **mist + boarding** primary spec from iter-3 stage 2 (per refinement-002 §L). Density scales with how distant the unlock is — day-1 secret door = thin mist; day-1 Wizard's Tower = thick fog with barely-readable silhouette.
 
 #### Festivals + events (Renown 8+)
 Periodic in-game events change the town for a window:
@@ -391,8 +521,10 @@ Periodic in-game events change the town for a window:
 - **Founders' Festival** — extra dialogue, free L1 upgrades.
 - **Eclipse** — the Catacombs activate special enemies for one run.
 
-#### World map (Renown 7+)
+#### World map (Renown VII+)
 Once the second settlement appears, a zoomed-out world-map view shows Tallowmark + the second settlement + dungeon entrances + travel routes. Quest objectives reference world-map locations. The world map is a Phaser scene; clicking a location enters it.
+
+**The minimap widget IS the world-map widget** — same 120×80 corner element, same `m` toggle. When player is on TownScene the minimap shows town tiles + locked-area silhouettes (mist-fogged at the appropriate density per §L). When player descends, it switches to dungeon view. When the world-map scene unlocks at Renown VII, `m` from town shows the world map; `m` from a dungeon shows the dungeon minimap; `m` from the world-map scene shows the local town/dungeon for context. Single widget, three contexts, consistent muscle memory.
 
 > **Why iter 7, not earlier:** Multiple dungeons require iter-5's biome system to be mature. Secret areas require iter-3 Founders + iter-4 Feats to be live so there's something to gate on. The Renown spine is itself the metaprogression skeleton — building it before the metaprogression *content* exists would be content-less scaffolding. **The iter-3 town authoring pattern (Tiled multi-tier exteriors, generic interior layout) was deliberately picked to support this expansion: adding a new building or new dungeon entrance to the town is a Tiled edit + a new scene file, not a TownScene rewrite.**
 
