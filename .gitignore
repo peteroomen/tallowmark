@@ -26,3 +26,6 @@ test-results/
 
 # Original Kenney asset downloads — unpacked folders are tracked, zips are not
 /kenney_*.zip
+
+# Stray editor workspace inside asset folders
+kenney_*/*.code-workspace
