@@ -168,6 +168,10 @@ export const CharsSheet = {
   oldMan: chars(0, 5),
   villagerOrange: chars(0, 4),
   villagerBald: chars(0, 0),
+  // Skeleton archer for iter-2 stage 9 — UNVERIFIED frame; F9 inspector
+  // should pick the actual skeleton sprite. Placeholder uses goblin frame
+  // so the enemy renders SOMETHING rather than nothing.
+  skeletonArcher: chars(0, 7), // UNVERIFIED — verify in F9
 } as const;
 
 /**

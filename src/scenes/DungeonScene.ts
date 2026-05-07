@@ -16,6 +16,7 @@ import { CombatSystem } from '@/combat/CombatSystem';
 import { Player } from '@/entities/Player';
 import { Enemy, type EnemyAiContext } from '@/entities/Enemy';
 import { RatAi } from '@/entities/ai/RatAi';
+import { ArcherAi } from '@/entities/ai/ArcherAi';
 import { generateBspDungeon, type GeneratedDungeon } from '@/world/Dungeon/BspGenerator';
 import { TileKind, TILES } from '@/world/Tile';
 import { CharsSheet, Inputs, UiLarge } from '@/world/FrameCatalog';
@@ -444,8 +445,6 @@ export class DungeonScene extends Phaser.Scene {
 
   private spawnEnemies(): void {
     // Floor-scaled enemy budget: floor 1 = 2-3, scaling up by floor.
-    // Multi-floor descent isn't wired yet; until iter 2's stairs-down
-    // chain ships, runState.floor stays at 1.
     const budget = Math.min(2 + this.runState.floor, 8);
     const candidates = this.rng.shuffle(this.dungeon.rooms.slice(1));
     let placed = 0;
@@ -454,13 +453,26 @@ export class DungeonScene extends Phaser.Scene {
       const rx = this.rng.intInclusive(room.x1, room.x2);
       const ry = this.rng.intInclusive(room.y1, room.y2);
       if (this.dungeon.tiles.get(rx, ry) !== TileKind.Floor) continue;
-      const enemy = new Enemy(
-        { x: rx, y: ry },
-        { hp: 5, hpMax: 5, power: 2, armor: 0 },
-        'goblin',
-        'Goblin',
-        new RatAi(),
-      );
+      // Floor 2+: roughly 1 in 3 enemies is a Skeleton Archer (iter-2 stage 9
+      // glass cannon). Floor 1 stays goblin-only so the new mechanics don't
+      // overwhelm a first-time player.
+      const isArcher =
+        this.runState.floor >= 2 && this.rng.next() < 0.33;
+      const enemy = isArcher
+        ? new Enemy(
+            { x: rx, y: ry },
+            { hp: 3, hpMax: 3, power: 3, armor: 0 },
+            'skeleton_archer',
+            'Skeleton Archer',
+            new ArcherAi(),
+          )
+        : new Enemy(
+            { x: rx, y: ry },
+            { hp: 5, hpMax: 5, power: 2, armor: 0 },
+            'goblin',
+            'Goblin',
+            new RatAi(),
+          );
       this.enemies.push(enemy);
       placed += 1;
     }
@@ -532,8 +544,9 @@ export class DungeonScene extends Phaser.Scene {
 
     for (const e of this.enemies) {
       const ew = tileToWorld(e.pos.x, e.pos.y);
+      const frame = e.kind === 'skeleton_archer' ? CharsSheet.skeletonArcher : ENEMY_FRAME;
       const s = this.add
-        .image(ew.x, ew.y, ASSET_KEYS.sprites.chars, ENEMY_FRAME)
+        .image(ew.x, ew.y, ASSET_KEYS.sprites.chars, frame)
         .setScale(RENDER_SCALE)
         .setOrigin(0.5)
         .setDepth(9);
@@ -1190,6 +1203,11 @@ export class DungeonScene extends Phaser.Scene {
         const sprite = this.enemySprites.get(enemy.id);
         if (sprite) this.tweenTo(sprite, to);
       },
+      isOpaque: (x, y) => {
+        if (!this.dungeon.tiles.inBounds(x, y)) return true;
+        return TILES[this.dungeon.tiles.get(x, y)].opaque;
+      },
+      fireProjectile: (self, target) => this.fireArrow(self, target),
     };
     for (const e of this.enemies) {
       if (!e.alive) continue;
@@ -1552,6 +1570,57 @@ export class DungeonScene extends Phaser.Scene {
     this.player.stats.armor = fresh.player.armor;
     if (this.player.stats.hp <= 0) this.player.alive = false;
     this.refreshHud();
+  }
+
+  /**
+   * Skeleton Archer projectile — tween a small dart from shooter to target
+   * over 120 ms (per refinement-002 §J), then resolve damage. The visual is
+   * a 4×4 white rectangle so we don't need an asset frame; readable enough
+   * at the dungeon zoom level.
+   */
+  private fireArrow(shooter: Enemy, target: Point): void {
+    const from = tileToWorld(shooter.pos.x, shooter.pos.y);
+    const to = tileToWorld(target.x, target.y);
+    const arrow = this.add
+      .rectangle(from.x, from.y, 6, 4, 0xfffbe6)
+      .setStrokeStyle(1, 0x1a1a14)
+      .setOrigin(0.5)
+      .setDepth(50)
+      .setRotation(Math.atan2(to.y - from.y, to.x - from.x));
+    this.log(`The ${shooter.displayName} draws back the bow.`, 'danger');
+    this.tweens.add({
+      targets: arrow,
+      x: to.x,
+      y: to.y,
+      duration: 120,
+      ease: 'Linear',
+      onComplete: () => {
+        arrow.destroy();
+        // Resolve damage post-tween. Player may have moved if a queued
+        // turn intervened — in iter-2 it can't (turns are synchronous).
+        if (!this.player.alive) return;
+        const result = this.combat.applyDamage(
+          this.player.stats,
+          this.combat.resolveAttack(shooter.stats, this.player.stats),
+        );
+        this.log(`The arrow strikes you for ${result.damage}.`, 'danger');
+        this.bus.emit({
+          kind: 'floatingText',
+          spec: { tile: { ...this.player.pos }, text: `-${result.damage}`, color: FT_COLOR_DAMAGE },
+        });
+        if (this.player.stats.hp <= 0) {
+          this.player.alive = false;
+          this.log('You die.', 'danger');
+          this.bus.emit({
+            kind: 'floatingText',
+            spec: { tile: { ...this.player.pos }, text: 'DIED', color: FT_COLOR_DEATH, size: 'large' },
+          });
+        }
+        // Mirror data layer for the HUD.
+        this.runState.player.hp = this.player.stats.hp;
+        this.refreshHud();
+      },
+    });
   }
 
   private cleanupDeadEnemies(): void {

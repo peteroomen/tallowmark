@@ -13,6 +13,9 @@ export interface EnemyAiContext {
   playerPos: Point;
   attackPlayer: (attacker: Enemy) => void;
   moveEnemy: (enemy: Enemy, to: Point) => void;
+  /** Optional — supplied by DungeonScene to support ranged AIs (Archer). */
+  isOpaque?: (x: number, y: number) => boolean;
+  fireProjectile?: (self: Enemy, target: Point) => void;
 }
 
 export class Enemy extends Entity {
