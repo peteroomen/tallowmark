@@ -35,6 +35,19 @@ export interface TrapState {
   revealed: boolean;
 }
 
+/**
+ * Floor descriptor — small flavour pool that gives every floor an identity
+ * before iter-5's biome system lands. Picked deterministically per
+ * (seed, floor). Affects gen-time choices: enemy budget, item budget,
+ * trap density, food spawn weight.
+ */
+export type FloorDescriptor =
+  | 'Quiet'
+  | 'Cramped'
+  | 'Open'
+  | 'Trapped'
+  | 'Hungry';
+
 /** Plain-data inventory entry — runtime `Inventory` class is rehydrated from these on load. */
 export interface InventorySlotData {
   defId: string;
@@ -79,6 +92,8 @@ export interface RunState {
   activeStatuses: ActiveStatus[];
   /** Hidden traps on the current floor; regenerated when descending. */
   traps: TrapState[];
+  /** Flavour descriptor for the current floor (Quiet / Cramped / Open / etc.). */
+  floorDescriptor: FloorDescriptor;
   /** Set when the run has ended; UIs check this to route to the death summary. */
   ended: { reason: 'death' | 'victory'; turn: number } | null;
 }
@@ -105,6 +120,7 @@ export function newRunState(
     identifications,
     activeStatuses: [],
     traps: [],
+    floorDescriptor: 'Quiet',
     ended: null,
   };
 }

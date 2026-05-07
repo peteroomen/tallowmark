@@ -52,7 +52,19 @@ import { STATUS_CATALOG, type StatusId, type StatusTarget } from '@/state/Status
 interface DungeonSceneData {
   fresh?: boolean;
   resume?: boolean;
+  /** True when re-entering after descending stairs. Loads runState but
+   *  treats the world as fresh — regenerates layout, resets playerPos. */
+  descend?: boolean;
 }
+
+/** Pool of floor descriptors picked deterministically per (seed, floor). */
+const FLOOR_DESCRIPTOR_POOL: ReadonlyArray<'Quiet' | 'Cramped' | 'Open' | 'Trapped' | 'Hungry'> = [
+  'Quiet',
+  'Cramped',
+  'Open',
+  'Trapped',
+  'Hungry',
+];
 
 const PLAYER_FRAME = CharsSheet.player;
 const ENEMY_FRAME = CharsSheet.goblin;
@@ -182,7 +194,7 @@ export class DungeonScene extends Phaser.Scene {
     for (const s of this.trapSprites.values()) s.destroy();
     this.trapSprites.clear();
     this.searchBoost = false;
-    if (data.resume && services.save.loadRun()) {
+    if ((data.resume || data.descend) && services.save.loadRun()) {
       this.runState = services.save.loadRun()!;
     } else {
       const seed = Date.now() & 0x7fffffff;
@@ -190,13 +202,41 @@ export class DungeonScene extends Phaser.Scene {
       this.runState = newRunState(seed, { x: 0, y: 0 }, buildIdentifications(seedRng));
     }
 
-    this.rng = Rng.fromSeed(this.runState.seed);
+    // Per-floor RNG: same base seed XOR the floor number so each floor is
+    // deterministically distinct. Combat / item / trap / enemy placement all
+    // share this single rng, so a floor is fully reproducible from
+    // (seed, floor).
+    this.rng = Rng.fromSeed((this.runState.seed ^ (this.runState.floor * 31337)) | 0);
     this.combat = new CombatSystem(this.rng);
     this.turnEngine = new TurnEngine();
     this.dungeon = generateBspDungeon(DUNGEON_W, DUNGEON_H, this.rng);
 
+    // Floor descriptor — deterministic per (seed, floor); a fresh rng so the
+    // descriptor doesn't drift if combat/item placement RNG is changed later.
+    const descriptorRng = Rng.fromSeed(
+      (this.runState.seed ^ (this.runState.floor * 0xdeadbeef)) | 0,
+    );
+    this.runState.floorDescriptor = descriptorRng.pick(FLOOR_DESCRIPTOR_POOL);
+
+    // Place stairs-up at the player's start tile on floor 1 only — climbing
+    // exits to town. Deeper floors are descent-only (no stairs-up).
+    if (this.runState.floor === 1) {
+      this.dungeon.tiles.set(
+        this.dungeon.playerStart.x,
+        this.dungeon.playerStart.y,
+        TileKind.StairsUp,
+      );
+    }
+
     if (!data.resume) {
+      // Fresh run OR descend — both want the player at the new layout's
+      // start tile. Resume keeps the player wherever they were on save.
       this.runState.playerPos = { ...this.dungeon.playerStart };
+      // Descending also clears floor-local state.
+      if (data.descend) {
+        this.runState.exploredTiles = [];
+        this.runState.traps = [];
+      }
     }
 
     this.player = new Player(this.runState.playerPos, { ...this.runState.player });
@@ -312,13 +352,24 @@ export class DungeonScene extends Phaser.Scene {
     });
 
     services.save.saveRun(this.runState);
-    if (!data.resume) {
+    if (data.descend) {
+      this.log(`The stairs end. ${this.flavourFor(this.runState.floorDescriptor)}.`, 'story');
+      this.log(`Floor ${this.runState.floor} — ${this.runState.floorDescriptor}.`, 'discovery');
+      this.showFloorTitleCard();
+    } else if (!data.resume) {
       this.log('Stale air, distant scratching.', 'story');
-      this.log(`Floor ${this.runState.floor}. Seed ${this.runState.seed}.`, 'discovery');
+      this.log(
+        `Floor ${this.runState.floor} — ${this.runState.floorDescriptor}. Seed ${this.runState.seed}.`,
+        'discovery',
+      );
       this.log('Watch for traps. Eat when you can.', 'neutral');
+      this.showFloorTitleCard();
     } else {
       this.log('You resume your descent.', 'neutral');
-      this.log(`Floor ${this.runState.floor}, turn ${this.runState.turn}.`, 'discovery');
+      this.log(
+        `Floor ${this.runState.floor} — ${this.runState.floorDescriptor}, turn ${this.runState.turn}.`,
+        'discovery',
+      );
     }
 
     // Dev hook for tests / AI agents — exposes a way to trigger game events
@@ -445,7 +496,16 @@ export class DungeonScene extends Phaser.Scene {
 
   private spawnEnemies(): void {
     // Floor-scaled enemy budget: floor 1 = 2-3, scaling up by floor.
-    const budget = Math.min(2 + this.runState.floor, 8);
+    // Descriptor modifiers: Quiet -1 (fewer enemies, more loot); Cramped +1
+    // (more bodies in tight halls); Hungry / Open / Trapped neutral.
+    const base = Math.min(2 + this.runState.floor, 8);
+    const descriptorAdj =
+      this.runState.floorDescriptor === 'Quiet'
+        ? -1
+        : this.runState.floorDescriptor === 'Cramped'
+          ? 1
+          : 0;
+    const budget = Math.max(1, base + descriptorAdj);
     const candidates = this.rng.shuffle(this.dungeon.rooms.slice(1));
     let placed = 0;
     for (const room of candidates) {
@@ -794,7 +854,9 @@ export class DungeonScene extends Phaser.Scene {
       this.runState.food === 0 ? 'STARVING' : this.runState.food < STARVATION_THRESHOLD ? 'Hungry' : 'Fed';
     this.hungerText.setText(`Food ${this.runState.food}/${this.runState.foodMax}  ${hungerLabel}`);
     this.refreshStatusIcons();
-    this.floorText.setText(`Floor ${this.runState.floor}    Turn ${this.runState.turn}`);
+    this.floorText.setText(
+      `Floor ${this.runState.floor} — ${this.runState.floorDescriptor}    Turn ${this.runState.turn}`,
+    );
   }
 
   /** Rebuild the status-icon row in the HUD. Icons tinted by status colour. */
@@ -1045,6 +1107,19 @@ export class DungeonScene extends Phaser.Scene {
 
     const tile = this.dungeon.tiles.get(target.x, target.y);
     if (tile === TileKind.StairsDown) {
+      // Step onto stairs-down → descend to next floor. Player state (HP,
+      // inventory, statuses, embers, kills) carries; floor-local state
+      // (explored, traps, layout) regenerates.
+      this.player.pos = { ...target };
+      this.runState.playerPos = { ...target };
+      this.tweenTo(this.playerSprite, target);
+      this.descendToNextFloor();
+      return;
+    }
+    if (tile === TileKind.StairsUp) {
+      // Step onto stairs-up (only present on floor 1) → exit to town with
+      // banked Embers. Deeper floors have no stairs-up; you can only go
+      // down or die.
       this.log('You climb back up to Tallowmark with what you found.', 'recovery');
       this.player.pos = { ...target };
       this.runState.playerPos = { ...target };
@@ -1218,11 +1293,25 @@ export class DungeonScene extends Phaser.Scene {
 
   private spawnItems(): void {
     const occupied = this.enemies.map((e) => ({ x: e.pos.x, y: e.pos.y }));
+    // Quiet floors trade enemies for loot. Hungry floors halve item count.
+    const baseCount = Math.max(2, Math.floor(this.dungeon.rooms.length / 2));
+    const count =
+      this.runState.floorDescriptor === 'Quiet'
+        ? baseCount + 2
+        : this.runState.floorDescriptor === 'Hungry'
+          ? Math.max(1, Math.floor(baseCount / 2))
+          : baseCount;
     const placements = placeItems(this.dungeon, this.rng, {
       floor: this.runState.floor,
+      count,
       occupied,
     });
-    for (const p of placements) this.items.push({ ...p });
+    // Hungry: filter out food drops entirely so the player feels the bite.
+    const filtered =
+      this.runState.floorDescriptor === 'Hungry'
+        ? placements.filter((p) => p.defId !== 'food_hardtack')
+        : placements;
+    for (const p of filtered) this.items.push({ ...p });
   }
 
   private spawnTraps(): void {
@@ -1234,8 +1323,17 @@ export class DungeonScene extends Phaser.Scene {
     ];
     // Resume picks up traps from saved RunState; otherwise generate fresh.
     if (this.runState.traps && this.runState.traps.length > 0) return;
+    // Trapped floors double the trap count. Quiet floors honour the per-floor
+    // cap. The placeTraps helper takes its own count override so descriptor
+    // tweaks happen here, not inside the placement logic.
+    const baseCount = Math.max(1, Math.floor(this.dungeon.rooms.length / 3));
+    const trapCap = this.runState.floor <= 1 ? 2 : Number.POSITIVE_INFINITY;
+    const desired =
+      this.runState.floorDescriptor === 'Trapped' ? baseCount * 2 : baseCount;
+    const count = Math.min(desired, trapCap);
     this.runState.traps = placeTraps(this.dungeon, this.rng, {
       floor: this.runState.floor,
+      count,
       occupied,
     });
   }
@@ -1668,9 +1766,96 @@ export class DungeonScene extends Phaser.Scene {
     }, 600);
   }
 
+  /** Floor-descriptor flavour line for the entry log. */
+  private flavourFor(d: string): string {
+    switch (d) {
+      case 'Quiet':
+        return 'A quiet floor. The walls hold their breath';
+      case 'Cramped':
+        return 'Tight corridors. Watch for arrows';
+      case 'Open':
+        return 'Wide rooms. Sight-lines open in every direction';
+      case 'Trapped':
+        return 'Tread carefully. The masons left teeth in the floor';
+      case 'Hungry':
+        return 'Nothing here grew, nothing here grew old';
+      default:
+        return 'You descend';
+    }
+  }
+
+  /**
+   * Animated title card on floor entry — 2-second fade per refinement-002 §E.
+   * 200 ms fade-in / 1400 ms hold / 400 ms fade-out. 48px serif, depth 950
+   * (above floating text at 70, below pause at 1000+).
+   */
+  private showFloorTitleCard(): void {
+    const cx = GAME_WIDTH / 2;
+    const cy = GAME_HEIGHT * 0.4;
+    const big = this.add
+      .text(cx, cy, `Floor ${this.runState.floor}`, {
+        fontFamily: 'serif',
+        fontSize: '48px',
+        color: '#e5e3d8',
+        stroke: '#1a1a24',
+        strokeThickness: 6,
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(950)
+      .setAlpha(0);
+    const sub = this.add
+      .text(cx, cy + 36, `— ${this.runState.floorDescriptor} —`, {
+        fontFamily: 'serif',
+        fontSize: '20px',
+        color: '#d4a24c',
+        fontStyle: 'italic',
+        stroke: '#1a1a24',
+        strokeThickness: 4,
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(950)
+      .setAlpha(0);
+    // Fade in / hold / fade out.
+    this.tweens.add({
+      targets: [big, sub],
+      alpha: 1,
+      duration: 200,
+      ease: 'Quad.easeOut',
+      onComplete: () => {
+        this.time.delayedCall(1400, () => {
+          this.tweens.add({
+            targets: [big, sub],
+            alpha: 0,
+            duration: 400,
+            ease: 'Quad.easeIn',
+            onComplete: () => {
+              big.destroy();
+              sub.destroy();
+            },
+          });
+        });
+      },
+    });
+  }
+
+  private descendToNextFloor(): void {
+    this.runState.floor += 1;
+    this.runState.exploredTiles = [];
+    this.runState.traps = [];
+    // Save before scene restart; the new create() will load this state.
+    getServices(this).save.saveRun(this.runState);
+    this.scene.start(SCENE_KEYS.Dungeon, { descend: true });
+  }
+
   private completeRunSurvived(): void {
     const services = getServices(this);
-    const reward = 10 + Math.max(0, 30 - Math.floor(this.runState.turn / 5));
+    // Reward scales with deepest floor reached + small turn-efficiency bonus.
+    // Per roadmap: "Embers reward scales with deepest floor reached."
+    const depthBonus = (this.runState.floor - 1) * 25;
+    const speedBonus = Math.max(0, 30 - Math.floor(this.runState.turn / 5));
+    const reward = 10 + depthBonus + speedBonus;
     services.setPersistent((s) => {
       s.metaCurrency += reward;
       s.hasCompletedFirstRun = true;

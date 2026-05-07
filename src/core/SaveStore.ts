@@ -143,6 +143,11 @@ export class SaveStore {
               typeof t.revealed === 'boolean',
           )
         : [],
+      floorDescriptor:
+        typeof r.floorDescriptor === 'string' &&
+        ['Quiet', 'Cramped', 'Open', 'Trapped', 'Hungry'].includes(r.floorDescriptor)
+          ? r.floorDescriptor
+          : 'Quiet',
       player: r.player
         ? {
             hp: typeof r.player.hp === 'number' ? r.player.hp : 20,
