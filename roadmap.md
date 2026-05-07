@@ -291,17 +291,96 @@ The current `u`/`d`/`s`/`q` verb-key stack works for desktop but won't survive i
 - **Animation** — open: 120 ms scale 0.8 → 1, alpha 0 → 1, easeOutBack (slight overshoot, settles). Close: 80 ms scale 1 → 0.9, alpha 1 → 0, easeInQuad (faster than open).
 - **Architectural rule** — the resolver is the prize, not the wheel. **Do not** let the wheel logic encode "what's a valid verb for an item." That belongs in `actions/Resolver.ts`. The wheel is dumb; it asks the resolver and renders the answer. This is what makes adding the iter-4 Cast verb a one-line resolver change, not a hunt through the wheel component.
 
-**Stage 5 — Found Founders system + Examine bottom-sheet + identification visual language** (2–3 days) — see below.
+**Stage 5 — Founders + Examine + identification visual + dialog/banner + puzzle primitive** (~4 days, sub-sliced)
+
+This is the gameplay payload of iter 3 — everything else is plumbing for it. Sub-sliced into three commits, each independently shippable:
+
+- **Stage 5a** (~1 day) — Examine bottom-sheet + door schema + LockCheck (4 condition kinds: `null` / `founder:<id>` / `item:<defId>` / `renown:<N>` / `feat:<id>`). Pure infrastructure, no Founder content depends on it but Founders need it. Ships first.
+- **Stage 5b** (~1 day) — Identification visual language (form/hue/sigil/name) using rune-pack sigil frames + programmatic glyph fallback, **plus** multi-resource schema migration (`metaCurrency` → `resources.embers` typed-but-optional shape). Both are "schema-now / content-later" infrastructure that other stages quietly depend on.
+- **Stage 5c** (~1.5 days) — Founders system itself: rescue mechanics (3 flavours), DialogScene + banner system, puzzle interaction primitive (one consumer: Blacksmith's iron key). Lands last because it pulls everything together.
 
 #### The Found Founders system
-Specialists are NPCs you rescue from specific dungeon floors. Once rescued, they appear permanently in town and offer services that you upgrade with meta-resources.
+Specialists are NPCs you rescue from specific dungeon floors. Once rescued, they appear permanently in town and offer services that you upgrade with meta-resources. Iter-3 ships the three Caves founders; iter-7 brings the other-biome founders.
 
-| Specialist     | Found on                | Service                                            | Upgrades use         |
-|----------------|-------------------------|----------------------------------------------------|----------------------|
-| Apothecary     | Floor 3 (boss room)     | Sells potions; potency upgrades; identification    | Herbal Regimen       |
-| Blacksmith     | Floor 6 (locked cell)   | Repairs gear; starting-gear upgrades; weapon +X    | Scrap Metal          |
-| Runemaster     | Floor 10 (secret room)  | Rune sockets on weapons; rune crafting             | Ancient Shards       |
-| *(more later)* | —                       | —                                                  | —                    |
+| Specialist     | Floor (Caves)           | Rescue style                                                                                  | Upgrades use         |
+|----------------|-------------------------|-----------------------------------------------------------------------------------------------|----------------------|
+| Apothecary     | 3, side-room NPC        | Walk up, Examine → Rescue verb, dialog. Side-room introduces the mechanic without friction.   | Herbal Regimen       |
+| Blacksmith     | 6, locked cell          | Drop the iron key from a Skeleton Captain enemy nearby → Apply key to door → enter cell → talk. Introduces the puzzle primitive. | Scrap Metal          |
+| Runemaster     | 10, **miniboss-revert** | Fight the corrupted Runemaster (25 HP / power 4 / armor 2). At HP=0, the corruption breaks; HP resets to 1, AI halts, dialog triggers ("The corruption tears free. The Runemaster blinks awake."). The most dramatic rescue. | Ancient Shards       |
+| *(iter-7 founders)* | other biomes        | Engineer (Sunken Mines, Renown III) / Necromancer (Catacombs, IV) / Seer (Glass Halls, IX)   | Per-biome resources  |
+
+**Founder placement is deterministic per (runSeed XOR floorNum)** — same seed always has the founder in the same room. Pre-rescue, walking past without rescuing leaves them present for the rest of the run; if you die without rescuing, the rescue persists from the moment of the *interaction*, not the run-end (rescue = the achievement, not bringing them home alive).
+
+**Natural gating, not run-count walls.** You can't reach floor 6 without surviving 5 floors of buildup; you can't beat the Runemaster's miniboss form without iter-2's worth of items. Iter-7 biomes gate by Renown (Sunken Mines = III, Catacombs = IV, Glass Halls = IX) — Renown comes from accumulated Embers + Founders + dungeon completions + Feats.
+
+#### Dialog system + banner system (lands with Founders, stage 5c)
+
+`ui/DialogScene.ts` — a per-NPC conversation overlay. Slides up from bottom (~55% screen), speaker name + icon top-left, body text fills the panel, Continue (or Space) advances one line. On the final line, choices replace Continue:
+
+```typescript
+interface DialogContent {
+  speaker: string;          // NPC display name
+  speakerIconFrame?: number;
+  lines: string[];           // one per Continue press
+  choices?: Array<{          // optional, on the LAST line only
+    label: string;
+    onPick: () => void;       // engineering hook (rescue, decline, etc.)
+  }>;
+}
+```
+
+Dismiss rules:
+- Tap-Esc: cancel mid-dialog. **Cancellation does NOT bank the rescue** — the player can re-trigger the dialog by interacting with the NPC again.
+- Hold-Esc (~600ms): skip the entire dialog and jump to the choices block (if any). Gestural; can't accidentally fire.
+- Final choice = the only commitment. Picking "Rescue" / "Help me up" / equivalent banks the founder.
+
+`ui/Banner.ts` — separate from DialogScene; fires on outcomes:
+
+```typescript
+spawnBanner(scene, {
+  title: 'RESCUED',
+  subtitle: 'The Apothecary will join you in town.',
+  tone: 'recovery',                       // green, matches log-line palette
+  shape: 'centre' | 'top-toast',          // big moment vs ambient
+  durationMs: 2500,
+});
+```
+
+**Two shapes**:
+- **Centre** (default for big moments) — large serif title + smaller monospace subtitle, fades in/out, holds for the duration. Same animation language as the floor-descriptor title card. Used for: rescues, dungeon-clear, Renown tier-up (iter 7), feat unlocks (iter 4).
+- **Top-toast** (ambient) — slim slide-down strip at the top of the screen. Used for: item identified, picked up rare, festival starting.
+
+Iter-3 stage 5c ships both shapes + the rescue dialog. Future scenes (shop UI, Founder L2 upgrade dialogue) reuse `DialogScene`.
+
+#### Puzzle interaction primitive (lands with Founders, stage 5c)
+
+The Blacksmith's locked-cell rescue introduces a puzzle primitive that future content extends. The primitive is **"Apply X item to Y tile"**:
+
+- Tile gains an optional `puzzleHook?: { kind: 'lockable' | 'burnable' | 'dissolvable' | 'pressure'; key?: string }`
+- Item gains optional `puzzleSolves?: ReadonlyArray<'lockable' | 'burnable' | ...>`
+- Action Wheel gains an "Apply" verb when player holds a usable item AND target tile has a `puzzleHook` whose `kind` matches the item's `puzzleSolves`
+- Resolver checks compatibility, consumes the item, mutates the tile
+
+**Iter-3 stage 5c ships only `'lockable' + 'iron_key'`** (one tile kind, one item kind, one consumer — the Blacksmith door). Iter-4 expands to burnable / dissolvable / pressure as the Apothecary's L3 unlocks (Salt of Dissolution, Burning Phial) become puzzle keys. Iter-5+ has dedicated puzzle rooms + multi-step solutions.
+
+#### Multi-resource economy schema (lands with stage 5b)
+
+Iter-2's `PersistentState.metaCurrency: number` becomes a typed-but-optional resources record. Single-resource for now (`embers`); other biomes add their own keys when they ship in iter 7:
+
+```typescript
+interface PersistentState {
+  resources: {
+    embers: number;    // universal currency, all biomes drop these (iter 3+)
+    // iter-7 additions, schema-reserved now:
+    ore?: number;      // Sunken Mines drops, Engineer's gear upgrades
+    bone?: number;     // Catacombs drops, Necromancer's bone armor
+    glass?: number;    // Glass Halls drops, Seer's mirror items
+  };
+  // ... rest unchanged
+}
+```
+
+`embers` is the always-on universal currency (think gold). Other resources are biome-specific drops gating biome-specific upgrades. SaveStore migration backfills `metaCurrency` → `resources.embers` for old saves. Town Status strip reads compactly: iter-3 shows `47 embers`; iter-7 shows `47e · 12o · 0b · 0g` (or hides zeros).
 
 #### Legacy Fragments — tiered meta-resources
 - **Common** (Iron, Cloth) — basic shop construction, level-1 upgrades
