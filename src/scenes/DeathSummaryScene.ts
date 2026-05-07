@@ -107,18 +107,21 @@ export class DeathSummaryScene extends Phaser.Scene {
     );
 
     // Bottom-right: the button. Eye lands here last; easiest to press.
-    const buttonContainer = this.add.container(GAME_WIDTH / 2 + 200, GAME_HEIGHT / 2 + 50);
-    new KenneyButton({
+    // QA-flagged bug: previously created an empty container at the cascade
+    // target and the actual KenneyButton at scene root — so the cascade
+    // animated nothing visible. KenneyButton IS a Container; cascade it
+    // directly.
+    const returnBtn = new KenneyButton({
       scene: this,
-      x: 0,
-      y: 0,
+      x: GAME_WIDTH / 2 + 200,
+      y: GAME_HEIGHT / 2 + 50,
       width: 280,
       height: 80,
       text: 'Return to\nTallowmark',
       variant: 'primary',
       onClick: () => this.scene.start(SCENE_KEYS.Town),
     });
-    cards.push(buttonContainer);
+    cards.push(returnBtn);
 
     // Centre band: run-at-a-glance.
     this.add

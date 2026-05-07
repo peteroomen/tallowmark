@@ -412,14 +412,31 @@ export class DungeonScene extends Phaser.Scene {
           triggerTrap?: (kind?: 'spike' | 'gas' | 'alarm') => void;
           applyStatus?: (id: StatusId, turns?: number) => void;
           giveItem?: (defId: string, count?: number) => void;
+          descendNow?: () => void;
+          jumpToFloor?: (n: number) => void;
         };
       };
       w.__tallowmark = w.__tallowmark ?? {};
+
+      // Soft-log helper — refreshLog can throw on first call before Phaser
+      // Text canvas is ready (QA-flagged P1: TypeError calling drawImage
+      // on null when dev hooks fire within ~2s of dungeon load). Wrap so
+      // the dev hook never crashes; falls back to console if the in-game
+      // log fails.
+      const devLog = (msg: string, tone: LogTone = 'discovery') => {
+        try {
+          this.log(msg, tone);
+        } catch {
+          // eslint-disable-next-line no-console
+          console.log(`[dev] ${msg}`);
+        }
+      };
+
       w.__tallowmark.killPlayer = () => {
         this.player.stats.hp = 0;
         this.player.alive = false;
         this.runState.player = { ...this.player.stats };
-        this.log('You die.', 'danger');
+        devLog('You die.', 'danger');
         this.bus.emit({
           kind: 'floatingText',
           spec: { tile: { ...this.player.pos }, text: 'DIED', color: FT_COLOR_DEATH, size: 'large' },
@@ -427,9 +444,6 @@ export class DungeonScene extends Phaser.Scene {
         this.handlePlayerDeath();
       };
       w.__tallowmark.triggerTrap = (kind) => {
-        // Spawn a trap of the requested kind on the player's tile (revealed)
-        // and immediately fire it. Lets QA test all trap effects without
-        // RNG-walking around the dungeon hoping to find one.
         const requested: 'spike' | 'gas' | 'alarm' = kind ?? 'spike';
         const trap = { pos: { ...this.player.pos }, kind: requested, revealed: true };
         this.runState.traps.push(trap);
@@ -440,7 +454,7 @@ export class DungeonScene extends Phaser.Scene {
       };
       w.__tallowmark.applyStatus = (id, turns) => {
         applyStatusTo(this.runState.activeStatuses, id, turns ?? 5);
-        this.log(`(dev) applied ${id} ×${turns ?? 5}`, 'discovery');
+        devLog(`(dev) applied ${id} ×${turns ?? 5}`, 'discovery');
         this.flashSpriteForStatus(this.playerSprite);
         getServices(this).save.saveRun(this.runState);
         this.refreshHud();
@@ -448,7 +462,7 @@ export class DungeonScene extends Phaser.Scene {
       w.__tallowmark.giveItem = (defId, count) => {
         const def = getItemDef(defId);
         if (!def) {
-          this.log(`(dev) unknown item def: ${defId}`, 'danger');
+          devLog(`(dev) unknown item def: ${defId}`, 'danger');
           return;
         }
         for (let i = 0; i < (count ?? 1); i++) {
@@ -458,11 +472,30 @@ export class DungeonScene extends Phaser.Scene {
           if (existing) existing.count += 1;
           else this.runState.inventory.push({ defId: def.id, count: 1 });
         }
-        this.log(`(dev) +${count ?? 1} ${def.trueName}`, 'discovery');
-        // Persist so the next InventoryScene open (which loads from
-        // SaveStore) sees the new items. QA-v6 caught this — without the
-        // save, the in-memory mutation was invisible to the overlay.
+        devLog(`(dev) +${count ?? 1} ${def.trueName}`, 'discovery');
         getServices(this).save.saveRun(this.runState);
+      };
+
+      // QA-flagged: floor 2+ unreachable in a time-budgeted session because
+      // stairs-down is consistently 60-100 turns of exploration away.
+      // descendNow() force-descends one floor; jumpToFloor(N) goes straight
+      // to floor N. Both bypass the layout-walk so QA can verify Stage 9
+      // (Skeleton Archer) and the multi-floor carry-over rules.
+      w.__tallowmark.descendNow = () => {
+        this.runState.floor += 1;
+        this.runState.exploredTiles = [];
+        this.runState.traps = [];
+        getServices(this).save.saveRun(this.runState);
+        devLog(`(dev) descending to floor ${this.runState.floor}`, 'story');
+        this.scene.start(SCENE_KEYS.Dungeon, { descend: true });
+      };
+      w.__tallowmark.jumpToFloor = (n) => {
+        this.runState.floor = Math.max(1, Math.floor(n));
+        this.runState.exploredTiles = [];
+        this.runState.traps = [];
+        getServices(this).save.saveRun(this.runState);
+        devLog(`(dev) jumping to floor ${this.runState.floor}`, 'story');
+        this.scene.start(SCENE_KEYS.Dungeon, { descend: true });
       };
     }
     void COLORS;
@@ -645,13 +678,16 @@ export class DungeonScene extends Phaser.Scene {
   private drawHud(): void {
     const stroke = { stroke: '#1a1a24', strokeThickness: 3 };
 
-    // Stat plank — backs HP/Hunger bars + numeric labels.
+    // Stat plank — three rows: HP / Hunger / Status icons. QA-flagged that
+    // the previous 60-px plank crammed status icons into the hunger line
+    // ("Food 188/200 ⬥Reg5⬥Bld3⬥Cnf5 Fed") and became unparseable at three
+    // simultaneous statuses. Dedicated row below.
     new KenneyPlank({
       scene: this,
       x: 4,
       y: 4,
       width: 360,
-      height: 60,
+      height: 96,
       variant: 'wood',
     })
       .setScrollFactor(0)
@@ -703,11 +739,11 @@ export class DungeonScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(1000);
 
-    // Status icon row — 16×16 sprites tinted by their StatusDef colour, each
-    // with a small remaining-turns countdown. Container is repopulated in
-    // refreshHud() so we don't leak nodes when statuses come and go.
+    // Status icon row — dedicated third row of the stat plank (per QA
+    // closeout feedback). Anchored at left, below hunger bar. StatusIcon
+    // widgets are 36 px each + 36 px label. Repopulated in refreshHud().
     this.statusIconLayer = this.add
-      .container(220, 38)
+      .container(14 + 18, 78)
       .setScrollFactor(0)
       .setDepth(1000);
 

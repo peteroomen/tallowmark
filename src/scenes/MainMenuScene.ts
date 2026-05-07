@@ -51,19 +51,29 @@ export class MainMenuScene extends Phaser.Scene {
     });
     y += dy;
 
-    // Cache the save state once at scene creation. Re-querying inside the
-    // onClick handler led to drift on fresh-load (bug #1 in the QA report).
+    // Continue is enabled if EITHER an in-progress dungeon run is saved OR
+    // the player has completed at least one run before (persistent state
+    // exists). The previous behaviour disabled Continue whenever loadRun()
+    // returned null — but loadRun is null after death (DeathSummary calls
+    // clearRun), so a returning player whose last action was dying saw a
+    // disabled Continue button despite localStorage having full state.
+    // This was the QA-flagged "Continue non-functional" bug.
+    //
+    // continueRun() already routes correctly: if a run exists → Dungeon
+    // resume, otherwise → Town. We just need to enable the click.
     const hasSavedRun = !!services.save.loadRun();
+    const hasPlayedBefore = services.persistent.hasCompletedFirstRun;
+    const canContinue = hasSavedRun || hasPlayedBefore;
     const continueBtn = new KenneyButton({
       scene: this,
       x: btnX,
       y,
-      text: hasSavedRun ? 'Continue' : 'Continue (no save)',
+      text: hasSavedRun ? 'Continue' : canContinue ? 'Continue' : 'Continue (no save)',
       onClick: () => {
-        if (hasSavedRun) this.continueRun();
+        if (canContinue) this.continueRun();
       },
     });
-    if (!hasSavedRun) {
+    if (!canContinue) {
       continueBtn.setAlpha(0.45);
       continueBtn.disableInteractive();
     }
