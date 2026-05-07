@@ -112,6 +112,7 @@ export class SaveStore {
         sfx: clamp01(p.audio?.sfx, def.audio.sfx),
       },
       hasCompletedFirstRun: !!p.hasCompletedFirstRun,
+      descentCount: typeof p.descentCount === 'number' ? p.descentCount : 0,
     };
   }
 

@@ -11,6 +11,7 @@ import {
 } from '@/config';
 import { CharsSheet, Inputs, TilesRPG, UiLarge } from '@/world/FrameCatalog';
 import { KenneyPlank } from '@/ui/KenneyPlank';
+import { TownStatusStrip } from '@/ui/TownStatusStrip';
 import { getServices } from '@/services';
 import {
   createEmptyMap,
@@ -559,31 +560,20 @@ export class TownScene extends Phaser.Scene {
 
   private drawHud(): void {
     const services = getServices(this);
-    new KenneyPlank({ scene: this, x: 4, y: 4, width: 200, height: 50, variant: 'wood' }).setDepth(99);
-    this.add
-      .text(14, 12, 'TALLOWMARK', {
-        fontFamily: 'monospace',
-        fontSize: '14px',
-        color: '#d4a24c',
-        fontStyle: 'bold',
-        stroke: '#1a1a24',
-        strokeThickness: 3,
-      })
-      .setOrigin(0, 0)
-      .setDepth(1000);
-    this.add
-      .text(14, 32, `Embers: ${services.persistent.resources.embers}`, {
-        fontFamily: 'monospace',
-        fontSize: '12px',
-        color: '#e5e3d8',
-        stroke: '#1a1a24',
-        strokeThickness: 3,
-      })
-      .setOrigin(0, 0)
-      .setDepth(1000);
+    // Iter-3 stage 2b: replaces the old TALLOWMARK plank + Embers count with
+    // the proper Town Status strip per refinement-002 §M. Single-line
+    // element along the top, full-width. Iter-7 will add Renown numeral +
+    // shops-open + NEW callout segments; this stage ships day + embers.
+    const strip = new TownStatusStrip(this);
+    strip.set({
+      day: services.persistent.descentCount,
+      embers: services.persistent.resources.embers,
+      // shopsOpen + renown + newCallout populated by iter-3 stage 5 + iter-7
+    });
     this.drawHudIcons();
     this.drawFooter();
     void COLORS;
+    void strip; // silence unused-var; strip is added to scene by Container ctor
   }
 
   private drawHudIcons(): void {

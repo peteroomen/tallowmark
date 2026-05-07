@@ -61,6 +61,12 @@ export interface PersistentState {
   audio: AudioSettings;
   /** True after a player has finished at least one full run. Used for menu state. */
   hasCompletedFirstRun: boolean;
+  /**
+   * Total fresh dungeon descents — used by the iter-3 Town Status strip
+   * as the "DAY N" counter. Increments on each `data.fresh` dungeon entry
+   * (not on between-floor descends). Persists across deaths.
+   */
+  descentCount: number;
 }
 
 export function defaultPersistentState(): PersistentState {
@@ -73,5 +79,6 @@ export function defaultPersistentState(): PersistentState {
     pendingStatuses: [],
     audio: { master: 0.8, music: 0.6, sfx: 0.8 },
     hasCompletedFirstRun: false,
+    descentCount: 0,
   };
 }

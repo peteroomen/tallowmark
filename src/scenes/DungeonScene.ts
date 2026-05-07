@@ -242,6 +242,11 @@ export class DungeonScene extends Phaser.Scene {
           p.pendingStatuses = [];
         });
       }
+      // Iter-3 stage 2b: increment the Town Status strip's "DAY N" counter
+      // on every fresh dungeon entry (not on resume / between-floor descend).
+      services.setPersistent((p) => {
+        p.descentCount += 1;
+      });
     }
 
     // Per-floor RNG: same base seed XOR the floor number so each floor is
